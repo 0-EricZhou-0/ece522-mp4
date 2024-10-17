@@ -101,6 +101,11 @@ std::string orig_kernel_time_file;
 std::string input_pf_kernel_time_file;
 std::string workspace_size_file;
 std::string pf_kernel_time_file;
+
+std::string tensor_info_file;
+std::string kernel_info_file;
+std::string kernel_aux_time_file;
+
 std::string stat_output_file;
 std::string output_folder_name;
 // simulation switches
@@ -117,6 +122,28 @@ std::mt19937 rand_device;
 double kernel_time_std_dev = 0;
 unsigned int ran_seed = 1;
 double kernel_speedup = 1;
+
+class RedirStdOut {
+    public:
+        RedirStdOut(std::string filename) {
+            info_file = output_folder_name + "/statistics/" + filename;
+            buffer.str("");
+            old_cout_buf = std::cout.rdbuf();
+            cout_buf = std::cout.rdbuf(buffer.rdbuf());
+            printf("Saving %s\n", filename.c_str());
+        }
+        ~RedirStdOut() {
+            std::ofstream fout(info_file.c_str());
+            fout << buffer.str();
+            fout.close();
+            std::cout.rdbuf(old_cout_buf);
+        }
+    private:
+        std::string info_file;
+        std::stringstream buffer;
+        std::streambuf *old_cout_buf;
+        std::streambuf *cout_buf;
+};
 
 /* Function: PrintOneToken()
  * Usage: PrintOneToken(T_Double, "3.5", val, loc);
@@ -150,7 +177,7 @@ static void PrintOneToken(yytokentype token, const char *text, YYSTYPE value,
 
 void CheckVar(double var, std::string variable_name, bool gt=true) {
     if ((gt && var < 0) || (!gt && var > 0)) {
-        eprintf("Invalid or missing <%s>, current value: %f, should be %s than 0, aborting\n", 
+        eprintf("Invalid or missing <%s>, current value: %f, should be %s than 0, aborting\n",
                 variable_name.c_str(), var, gt ? "greater" : "less");
         Assert(false);
     }
@@ -176,10 +203,7 @@ void SimulationParamSanityCheck() {
         CheckVar(prefetch_degree, "prefetch_degree");
     else
         CheckVar(prefetch_degree, "prefetch_degree", false);
-    if (eviction_policy == Simulator::GPUPageTable::EvcPolicy::GUIDED || 
-        eviction_policy == Simulator::GPUPageTable::EvcPolicy::GUIDED_LRU ||
-        eviction_policy == Simulator::GPUPageTable::EvcPolicy::PERFECT_GUIDED ||
-        eviction_policy == Simulator::GPUPageTable::EvcPolicy::PERFECT_GUIDED_LRU)
+    if (eviction_policy == Simulator::GPUPageTable::EvcPolicy::GUIDED)
         CheckVar(num_candidate, "num_candidate");
     else
         CheckVar(num_candidate, "num_candidate", false);
@@ -249,6 +273,162 @@ void SetupOutputFolder() {
     }
 }
 
+void exportKernelInfo(string dnn_type, int batch_size) {
+    string output_path = "../results_modified/" + dnn_type + "/sim_input/";
+    Assert(system(("mkdir -p " + output_path).c_str()) == 0);
+    double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
+    FILE* fout;
+
+    fout = fopen((output_path + to_string(batch_size) + "Tensor.info").c_str(), "w");
+    Assert(fout);
+    for (Tensor* tensor : tensor_list) {
+        fprintf(fout, "%d %lld %s\n", tensor->tensor_id, tensor->raw_size_byte, tensor->is_global_weight ? "true" : "false");
+    }
+    fflush(fout);
+    fclose(fout);
+
+    fout = fopen((output_path + to_string(batch_size) + "Kernel.info").c_str(), "w");
+    Assert(fout);
+    for (CUDAKernel &kernel : kernel_list) {
+        std::vector<Tensor*> required_input_tensors;
+        std::vector<Tensor*> required_output_tensors;
+        Tensor* required_workspace_tensor;
+
+        kernel.getRequiredTensors(required_input_tensors, required_output_tensors, required_workspace_tensor);
+
+        int item_cnt = 0;
+        fprintf(fout, "%d %s %.6f [", kernel.kernel_id, print_kerneltype_array[kernel.type].c_str(),
+            kernel.execution_cycles / GPU_frequency_Hz * 1000);
+        item_cnt = 0;
+        for (Tensor *t : required_input_tensors) {
+            fprintf(fout, "%s%d", item_cnt ? "," : "", t->tensor_id);
+            item_cnt++;
+        }
+        fprintf(fout, "] [");
+        item_cnt = 0;
+        for (Tensor *t : required_output_tensors) {
+            fprintf(fout, "%s%d", item_cnt ? "," : "", t->tensor_id);
+            item_cnt++;
+        }
+        if (required_workspace_tensor) {
+            fprintf(fout, "] %d\n", required_workspace_tensor->tensor_id);
+        } else {
+            fprintf(fout, "]\n");
+        }
+    }
+    fflush(fout);
+    fclose(fout);
+
+    fout = fopen((output_path + to_string(batch_size) + "AuxTime.info").c_str(), "w");
+    Assert(fout);
+    for (CUDAKernel &kernel : kernel_list) {
+        fprintf(fout, "%d %.6f %.6f\n", kernel.kernel_id,
+            (double) kernel.input_pf_execution_cycles / GPU_frequency_Hz * 1000,
+            (double) kernel.pf_execution_cycles / GPU_frequency_Hz * 1000);
+    }
+    fflush(fout);
+    fclose(fout);
+}
+
+void loadKernelInfo() {
+    double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
+    std::string line;
+
+    {
+        // load tensor info
+        std::ifstream tensor_info_fin(tensor_info_file);
+        Assert(tensor_info_fin.good());
+        iprintf("Loading tensor info from file <%s>\n", tensor_info_file.c_str());
+
+        string tensor_id, tensor_size, tensor_global;
+        tensor_list.clear();
+        while (std::getline(tensor_info_fin, line)) {
+            std::stringstream ss(line);
+            tensor_id.clear();
+            ss >> tensor_id >> tensor_size >> tensor_global;
+            if (!tensor_id.size()) continue;
+
+            // populate tensor list
+            tensor_list.push_back(new Tensor(
+                std::stoll(tensor_size), tensor_global == "true"
+            ));
+        }
+        iprintf("Total %d tensors found\n", tensor_list.size());
+    } {
+        // load kernel info
+        std::ifstream kinfo_fin(kernel_info_file);
+        Assert(kinfo_fin.good());
+        iprintf("Loading kernel info from file <%s>\n", kernel_info_file.c_str());
+
+        string kernel_idx, ktype, exe_time, input_tensor_list, output_tensor_list, workspace;
+        kernel_list.clear();
+        while (std::getline(kinfo_fin, line)) {
+            std::stringstream ss(line);
+            kernel_idx.clear();
+            ss >> kernel_idx >> ktype >> exe_time >> input_tensor_list >> output_tensor_list >> workspace;
+            if (!kernel_idx.size()) continue;
+
+            std::vector<Tensor*> inputs;
+            std::vector<Tensor*> outputs;
+            Tensor* workspace_tensor;
+
+            auto list_to_vec_tensor = [](std::vector<Tensor*> &vec_tensor, const std::string &str_list) {
+                Assert(str_list.front() == '[' && str_list.back() == ']');
+                std::string tensor_id;
+                std::istringstream ss(str_list.substr(1, str_list.size() - 2));
+                while(std::getline(ss, tensor_id, ',')) {
+                    int tensor_id_i = std::stoi(tensor_id);
+                    Assert(tensor_id_i < tensor_list.size());
+                    vec_tensor.push_back(tensor_list[tensor_id_i]);
+                }
+            };
+            // input tensor list
+            list_to_vec_tensor(inputs, input_tensor_list);
+            // output tensor list
+            list_to_vec_tensor(outputs, output_tensor_list);
+            // workspace tensor
+            Assert(std::stoi(workspace) < tensor_list.size());
+            workspace_tensor = workspace.size() ? tensor_list[std::stoi(workspace)] : nullptr;
+            if (workspace_tensor) outputs.push_back(workspace_tensor);
+
+            // populate kernel list
+            kernel_list.push_back(CUDAKernel(
+                std::stoi(kernel_idx), kernel_type_revmap.at(ktype), inputs, outputs, workspace_tensor
+            ));
+            kernel_list.back().execution_cycles = std::stod(exe_time) * GPU_frequency_Hz / 1000.0;
+        }
+        iprintf("Total %d kernels found\n", kernel_list.size());
+    } {
+        // load kernel aux info
+        std::ifstream auxtime_fin(kernel_aux_time_file);
+        Assert(auxtime_fin.good());
+        iprintf("Loading aux kernel info from file <%s>\n", kernel_aux_time_file.c_str());
+
+        string kernel_idx, input_pf_exe_time, pf_exe_time;
+        while (std::getline(auxtime_fin, line)) {
+            std::stringstream ss(line);
+            kernel_idx.clear();
+            ss >> kernel_idx >> input_pf_exe_time >> pf_exe_time;
+            if (!kernel_idx.size()) continue;
+
+            // populate aux timing info for performance model
+            int kernel_idx_i = std::stoi(kernel_idx);
+            kernel_list[kernel_idx_i].input_pf_execution_cycles = std::stod(input_pf_exe_time) * GPU_frequency_Hz / 1000.0;
+            kernel_list[kernel_idx_i].pf_execution_cycles = std::stod(pf_exe_time) * GPU_frequency_Hz / 1000.0;
+        }
+    } {
+        // validation
+        for (unsigned tensor_idx = 0; tensor_idx < kernel_list.size(); tensor_idx++) {
+            Assert(tensor_list[tensor_idx]->tensor_id == tensor_idx);
+        }
+        for (unsigned kernel_idx = 0; kernel_idx < kernel_list.size(); kernel_idx++) {
+            Assert(kernel_list[kernel_idx].kernel_id == kernel_idx);
+            Assert(kernel_list[kernel_idx].input_pf_execution_cycles >= kernel_list[kernel_idx].execution_cycles);
+            Assert(kernel_list[kernel_idx].pf_execution_cycles >= kernel_list[kernel_idx].input_pf_execution_cycles);
+        }
+    }
+}
+
 void loadWorkspaceSizes() {
     std::ifstream wok_f(workspace_size_file);
     Assert(wok_f.good());
@@ -272,17 +452,13 @@ void loadWorkspaceSizes() {
             kernel_list[i].outputs.insert(kernel_list[i].workspace);
             tensor_list.push_back(kernel_list[i].workspace);
         }
-        
     }
-    iprintf("Loading workspace sizes done\n\n", "");
+    iprintf("Loading workspace sizes done\n", "");
 }
-
-
-
 
 void loadKernelTimes() {
     double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
-    
+
     std::ifstream orig_f(orig_kernel_time_file);
     std::ifstream pf_f(pf_kernel_time_file);
     std::ifstream inputpf_f(input_pf_kernel_time_file);
@@ -291,7 +467,7 @@ void loadKernelTimes() {
     Assert(inputpf_f.good());
 
     int kernel_num;
-    string exe_time_ms_str; 
+    string exe_time_ms_str;
     string unit;
     // read in all the execution times
     long exe_time_cycle;
@@ -356,30 +532,8 @@ void loadKernelTimes() {
     exe_time_ms_str = "";
     inputpf_f >> exe_time_ms_str;
     Assert(exe_time_ms_str == "");
-    iprintf("Loading kernel times done\n\n", "");
+    iprintf("Loading kernel times done\n", "");
 }
-
-class RedirStdOut {
-    public:
-        RedirStdOut(std::string filename) {
-            info_file = output_folder_name + "/statistics/" + filename;
-            buffer.str("");
-            old_cout_buf = std::cout.rdbuf();
-            cout_buf = std::cout.rdbuf(buffer.rdbuf());
-            printf("Saving %s\n", filename.c_str());
-        }
-        ~RedirStdOut() {
-            std::ofstream fout(info_file.c_str());
-            fout << buffer.str();
-            fout.close();
-            std::cout.rdbuf(old_cout_buf);
-        }
-    private:
-        std::string info_file;
-        std::stringstream buffer;
-        std::streambuf *old_cout_buf;
-        std::streambuf *cout_buf;
-};
 
 /* Function: main()
  * ----------------
@@ -396,13 +550,14 @@ int main(int argc, char *argv[]) {
         Assert(false);
     }
     // exit if config file does not exist
-    std::ifstream config_file(argv[1]);
+    std::string config_file_path = string(argv[1]);
+    std::ifstream config_file(config_file_path);
     if (!config_file.good()) {
         eprintf("Config file <%s> does not exist\n", argv[1]);
         Assert(false);
     }
     // parse config file
-    std::string line; 
+    std::string line;
     std::string command;
     std::string value;
     printf("\nConfigs:\n");
@@ -412,7 +567,7 @@ int main(int argc, char *argv[]) {
         value.clear();
         ss >> command >> value;
         if (command != "#" && command != "")
-            printf("  %25s: <%s>\n", command.c_str(), value.c_str());
+            printf("%27s: <%s>\n", command.c_str(), value.c_str());
 
         // general settings
         if (command == "output_folder")                 { output_folder_name = value; }
@@ -440,11 +595,17 @@ int main(int argc, char *argv[]) {
         // simulation general settings
         else if (command == "is_UVM")                   { is_UVM = std::stoi(value) != 0; }
         else if (command == "use_prefetch")             { use_prefetch = std::stoi(value) != 0; }
+
         else if (command == "nn_model_input_file")      { nn_model_input_file = value; }
         else if (command == "orig_kernel_time_file")    { orig_kernel_time_file = value; }
         else if (command == "workspace_size_file")      { workspace_size_file = value; }
         else if (command == "input_pf_kernel_time_file"){ input_pf_kernel_time_file = value; }
         else if (command == "pf_kernel_time_file")      { pf_kernel_time_file = value; }
+
+        else if (command == "tensor_info_file")         { tensor_info_file = value; }
+        else if (command == "kernel_info_file")         { kernel_info_file = value; }
+        else if (command == "kernel_aux_time_file")     { kernel_aux_time_file = value; }
+
         else if (command == "stat_output_file")         { stat_output_file = value; }
         else if (command == "migration_policy")         { migration_policy_str = value; }
         else if (command == "eviction_policy")          { eviction_policy_str = value; }
@@ -483,23 +644,38 @@ int main(int argc, char *argv[]) {
     // sanity check
     Assert((int) Simulator::GPUPageTable::EvcPolicy::DEEPUM != (int) Simulator::MigPolicy::DEEPUM);
 
-    // indirection if there is no file is fed through stdin
-    if (isatty(fileno(stdin))) {
-      if (nn_model_input_file.empty()) {
-        eprintf("No input NN model in either stdin or config file\n", "");
-      } else {
-        // open a file and redirect to stdin
-        std::ifstream nn_model(nn_model_input_file.c_str());
-        if (!nn_model.good()) {
-            eprintf("Invalid input NN model specified in config file <%s>\n", 
-                    nn_model_input_file.c_str());
-            Assert(false);
+    bool transform_input;
+    if (nn_model_input_file.size() != 0) {
+        Assert(orig_kernel_time_file.size() != 0);
+        Assert(workspace_size_file.size() != 0);
+        Assert(input_pf_kernel_time_file.size() != 0);
+        Assert(pf_kernel_time_file.size() != 0);
+        transform_input = true;
+    } else {
+        Assert(tensor_info_file.size() != 0);
+        Assert(kernel_info_file.size() != 0);
+        Assert(kernel_aux_time_file.size() != 0);
+        transform_input = false;
+    }
+
+    if (transform_input) {
+        // indirection if there is no file is fed through stdin
+        if (isatty(fileno(stdin))) {
+        if (nn_model_input_file.empty()) {
+            eprintf("No input NN model in either stdin or config file\n", "");
+        } else {
+            // open a file and redirect to stdin
+            std::ifstream nn_model(nn_model_input_file.c_str());
+            if (!nn_model.good()) {
+                eprintf("Invalid input NN model specified in config file <%s>\n",
+                        nn_model_input_file.c_str());
+                Assert(false);
+            }
+            if (is_transformer!=1) {
+                freopen(nn_model_input_file.c_str(), "r", stdin);
+            }
         }
-        if (is_transformer!=1)
-        {
-            freopen(nn_model_input_file.c_str(), "r", stdin);
         }
-      }
     }
     // parameter transformation
     if (output_folder_name.back() == '/') output_folder_name.pop_back();
@@ -514,12 +690,6 @@ int main(int argc, char *argv[]) {
             eviction_policy = Simulator::GPUPageTable::EvcPolicy::LRU;
         } else if (eviction_policy_str == "GUIDED") {
             eviction_policy = Simulator::GPUPageTable::EvcPolicy::GUIDED;
-        } else if (eviction_policy_str == "GUIDED_LRU") {
-            eviction_policy = Simulator::GPUPageTable::EvcPolicy::GUIDED_LRU;
-        } else if (eviction_policy_str == "PERFECT_GUIDED") {
-            eviction_policy = Simulator::GPUPageTable::EvcPolicy::PERFECT_GUIDED;
-        } else if (eviction_policy_str == "PERFECT_GUIDED_LRU") {
-            eviction_policy = Simulator::GPUPageTable::EvcPolicy::PERFECT_GUIDED_LRU;
         } else if (eviction_policy_str == "DEEPUM") {
             eviction_policy = Simulator::GPUPageTable::EvcPolicy::DEEPUM;
         } else {
@@ -562,76 +732,68 @@ int main(int argc, char *argv[]) {
 
     SetupOutputFolder();
 
-    if (is_transformer==1)
-    {
-        transformer_parse(nn_model_input_file.c_str());
-        transformer_op_datalow_pass(borden);
-    }
-    else {
-    
-        InitScanner();
-        // yytokentype token;
-        // while ((token = (yytokentype)yylex()) != 0)
-        //     PrintOneToken(token, yytext, yylval, yylloc);
-        InitParser();
-
-        yyparse();
-
-        layer_pre_pass_datasize();
-
-        layer_first_pass_dataflow();
-    }
-
-
-    printf("\n");
-
-    if (!is_simulation) {
-        // tensor info
-        r = new RedirStdOut("tensors.config");
-        for (size_t i = 0; i < tensor_list.size(); i++) {
-            tensor_list[i]->print();
+    if (transform_input) {
+        if (is_transformer == 1) {
+            transformer_parse(nn_model_input_file.c_str());
+            transformer_op_datalow_pass(borden);
+        } else {
+            InitScanner();
+            InitParser();
+            yyparse();
+            layer_pre_pass_datasize();
+            layer_first_pass_dataflow();
         }
-        delete r;
-    }
 
-   
-    if (is_transformer==1)
-    {
-        // layer info
-        r = new RedirStdOut("layers.config");
-        for (size_t i = 0; i < forward_ops.size(); i++) {
-            forward_ops[i]->print();
+        if (!is_simulation) {
+            // tensor info
+            r = new RedirStdOut("tensors.config");
+            for (size_t i = 0; i < tensor_list.size(); i++) {
+                tensor_list[i]->print();
+            }
+            delete r;
         }
-        delete r;
-        transformer_scheduling_kernels();
-    }
-    else
-    {
-        // layer info
-        r = new RedirStdOut("layers.config");
-        for (size_t i = 0; i < forward_layers.size(); i++) {
-            forward_layers[i]->print();
+
+        if (is_transformer == 1) {
+            // layer info
+            r = new RedirStdOut("layers.config");
+            for (size_t i = 0; i < forward_ops.size(); i++) {
+                forward_ops[i]->print();
+            }
+            delete r;
+            transformer_scheduling_kernels();
+        } else {
+            // layer info
+            r = new RedirStdOut("layers.config");
+            for (size_t i = 0; i < forward_layers.size(); i++) {
+                forward_layers[i]->print();
+            }
+            delete r;
+
+            layer_second_pass_scheduling_kernels();
         }
-        delete r;
-
-        layer_second_pass_scheduling_kernels();
+    } else {
+        loadKernelInfo();
     }
 
-    // for (size_t i = 0; i < kernel_list.size(); i++) {
-    //     kernel_list[i].print();
-    // }
-
-    nprintf("Global Memory amount: %lld B\n", memory_offset_weights);
-    nprintf("Total Memory spend in 1 iteration: %lld B\n", memory_offset_intermediate);
-
-    // return 0;
-
-    printf("\n");
     if (is_simulation) {
+        if (transform_input) {
+            loadKernelTimes();
+            loadWorkspaceSizes();
+            std::string token;
 
-        loadKernelTimes();
+            std::istringstream ss1(config_file_path);
+            std::vector<std::string> vec1;
+            while(std::getline(ss1, token, '/')) vec1.push_back(token);
 
-        loadWorkspaceSizes();
+            std::istringstream ss2(vec1[vec1.size() - 1]);
+            std::vector<std::string> vec2;
+            while(std::getline(ss2, token, '-')) vec2.push_back(token);
+
+            string dnn_name = vec1[vec1.size() - 2];
+            int batch_size = std::stoi(vec2[0]);
+            exportKernelInfo(dnn_name, batch_size);
+        }
+
         // tensor info
         r = new RedirStdOut("tensors.config");
         for (size_t i = 0; i < tensor_list.size(); i++) {
@@ -646,11 +808,9 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
-        nprintf("Global Memory amount: %lld B\n", memory_offset_weights);
-        nprintf("Total Memory spend in 1 iteration: %lld B\n", memory_offset_intermediate);
-
-
-        nprintf("Memory Overcommitment: %lld B/%lld B, %f GB/%f GB (%f%%)\n", 
+        nprintf("Global Memory amount:       %12lld B (%8.2f GB)\n", memory_offset_weights, memory_offset_weights / pow(1024, 3));
+        nprintf("Intermediate Memory amount: %12lld B (%8.2f GB)\n", memory_offset_intermediate, memory_offset_intermediate / pow(1024, 3));
+        nprintf("Memory Overcommitment:      %lld B/%lld B, %f GB/%f GB (%f%%)\n",
                 memory_offset_intermediate + memory_offset_weights, (long long) (GPU_memory_size_GB * std::pow(1024, 3)),
                 (memory_offset_intermediate + memory_offset_weights) / std::pow(1024, 3), GPU_memory_size_GB,
                 (memory_offset_intermediate + memory_offset_weights) / (GPU_memory_size_GB * std::pow(1024, 3)) * 100);
@@ -671,23 +831,22 @@ int main(int argc, char *argv[]) {
         }
         double max_memory_usage_GB = max_num_pages * PAGE_SIZE / std::pow(1024, 3);
         Assert(max_mem_usage_kernel != nullptr);
-        nprintf("Memory Usage Maximized at Kernel%d: %lld B (%f GB)\n", 
+        nprintf("Memory Usage Maximized at Kernel%d: %lld B (%f GB)\n",
                 max_mem_usage_kernel->kernel_id, max_num_pages * PAGE_SIZE,
                 max_memory_usage_GB);
         if (max_memory_usage_GB > GPU_memory_size_GB) {
-            eprintf("Single kernel memory usage %f GB greater than total GPU memory size %f GB, aborting", 
+            eprintf("Single kernel memory usage %f GB greater than total GPU memory size %f GB, aborting",
                     max_memory_usage_GB, GPU_memory_size_GB);
             Assert(false);
         }
 
-        
-        
+        if (transform_input) {
+            exit(0);
+        }
+
         tensor_first_pass_liveness_analysis();
-
         tensor_second_pass_interval_formation();
-
         get_interval_time();
-
 
         // life cycle info
         r = new RedirStdOut("interval.config");
@@ -699,103 +858,6 @@ int main(int argc, char *argv[]) {
 
 
         give_eviction_guide();
-        
-        // r = new RedirStdOut("evc_guide_compressed.config");
-        // int max_len = 0, max_idx = -1;
-        // std::map<int, int> distri;
-        // for (int tensor_idx = 0; tensor_idx < tensor_list.size(); tensor_idx++) {
-        //     Tensor *candidate = tensor_list[tensor_idx];
-        //     int cur_len = 0;
-        //     std::cout << "Tensor: " << candidate->tensor_id << "\n";
-        //     Eviction_P current_hotness = EvictionGuide_Table[0].entry[candidate];
-        //     for (long i = 0; i < kernel_list.size(); i++) {
-        //         Eviction_P hotness = EvictionGuide_Table[i].entry[candidate];
-        //         if (i == 0 || hotness != current_hotness) {
-        //             std::cout << i << ":" << print_eviction_array[hotness].c_str() << "\n";
-        //             current_hotness = hotness;
-        //             cur_len++;
-        //         }
-        //     }
-        //     if (cur_len > max_len) {
-        //         max_len = cur_len;
-        //         max_idx = tensor_idx;
-        //     }
-        //     distri[cur_len]++;
-        //     std::cout << "\n";
-        // }
-        // std::cout << "Max len: " << max_len << " @ Tensor: " << max_idx << "\n";
-        // std::cout << "Distribution:\n";
-        // for (auto it = distri.begin(); it != distri.end(); ++it) {
-        //     std::cout << "  " << it->first << ":" << it->second << "\n";
-        // }
-        // delete r;
-
-        
-        //Implementation of flashneuron
-        if (migration_policy_str=="FLASHNEURON"|| migration_policy_str=="G10GDSSSD" || migration_policy_str=="G10GDSFULL")
-        {
-            if (migration_policy_str=="FLASHNEURON")
-            {
-                int fail;
-                fail = scheduling_offload_flashneuron();
-                if (fail == 1)
-                {
-                    std::cout<<"@@@ Flashneuron cannot support this large model!"<<std::endl;
-                    return 0;
-                }
-                print_offloading_flashneuron();
-                std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"<<std::endl;
-            }
-            else
-            {
-                r = new RedirStdOut("pre_dealloc.config");
-                scheduling_prefetch();
-                delete r;
-                // prefetch guide
-                r = new RedirStdOut("prefetch_guide.config");
-                print_prefetch_table();
-                delete r;
-            }
-            
-
-            GDS_Baseline_Type sim_type;
-            if (migration_policy_str=="FLASHNEURON")
-            {
-                sim_type = GDS_Baseline_Type::FlashNeuron;
-            }
-            else if (migration_policy_str=="G10GDSSSD")
-            {
-                sim_type = GDS_Baseline_Type::G10_GDS_SSD;
-            }
-            else
-            {
-                sim_type = GDS_Baseline_Type::G10_GDS_FULL;
-            }
-        
-            FlashNeuron_simulator sim(SSD_PCIe_bandwidth_GBps, CPU_PCIe_bandwidth_GBps, GPU_memory_size_GB, sim_type);
-            sim.run();
-            double time_ = sim.total_sim_time;
-            std::string info_file = output_folder_name + "/sim_result.final";
-            std::ofstream foout(info_file);
-            foout<<"total_exe_time = "<<time_<<std::endl; 
-            foout<<"total_time_breakdown_stall = "<<sim.total_time_breakdown_stall<<std::endl;
-            foout<<"total_time_breakdown_overlap = "<<sim.total_time_breakdown_overlap<<std::endl;
-            foout<<"total_time_breakdown_executionOnly = "<<sim.total_time_breakdown_exe<<std::endl;
-            foout<<"total_ssd2gpu_byte = "<<sim.total_fetch_byte<<std::endl;
-            foout<<"total_gpu2ssd_byte = "<<sim.total_offload_byte<<std::endl;
-            std::string info_file2 = output_folder_name + "/sim_result.kernelStall";
-            std::ofstream fooout(info_file2);
-            if (migration_policy_str=="FLASHNEURON")
-            {
-                for (int i = 0; i < sim.fl_kernel_stall_normed.size(); i++)
-                {
-                    fooout<<(sim.fl_kernel_stall_normed[i] < 0.0001 ? 0 : sim.fl_kernel_stall_normed[i]) <<std::endl;
-                }
-            }
-            
-            
-            return 0;
-        }
 
         // eviction guide
         // r = new RedirStdOut("evc_guide.config");
@@ -811,8 +873,6 @@ int main(int argc, char *argv[]) {
         print_prefetch_table();
         delete r;
 
-        
-
         // real memory usage
         r = new RedirStdOut("real_mem.config");
         print_GPU_mem_really_in_use();
@@ -825,125 +885,7 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
-
-
-
-
-/***********************************Getting Motivation Number***************************************/
-        string argv1 = output_folder_name;
-        string filenaeme;
-        filenaeme = argv1+"_NNMemConsumptionLog.py";
-        printf("%s\n", filenaeme.c_str());
-        std::ofstream motiv_1(filenaeme);
-
-        motiv_1<<"active = [";
-        for (auto it = kernel_list.begin(); it != kernel_list.end(); ++it) {
-            CUDAKernel *current_kernel = &(*it);
-            vector<Tensor *> required_tensors;
-            current_kernel->getRequiredTensors(required_tensors);
-            long num_bytes = 0;
-            for (Tensor *tensor : required_tensors) {
-                num_bytes += std::ceil((float) tensor->size_in_byte);
-            }
-            motiv_1<<num_bytes<<",";
-        }
-
-        motiv_1<<"]\n";
-
-        motiv_1 << "active_breakdown = [";
-        for (auto it = kernel_list.begin(); it != kernel_list.end(); ++it) {
-            CUDAKernel *current_kernel = &(*it);
-            vector<Tensor *> inputs, weights, intermediates;
-            current_kernel->getTensorBreakdown(inputs, weights, intermediates);
-            long input_bytes = 0, weight_bytes = 0, intermediate_bytes = 0;
-            for (Tensor *tensor : inputs)
-                input_bytes += std::ceil((float) tensor->size_in_byte);
-            for (Tensor *tensor : weights)
-                weight_bytes += std::ceil((float) tensor->size_in_byte);
-            for (Tensor *tensor : intermediates)
-                intermediate_bytes += std::ceil((float) tensor->size_in_byte);
-            motiv_1<< "(" << input_bytes << "," << weight_bytes << "," << intermediate_bytes << "),";
-        }
-
-        motiv_1<<"]\n";
-
-
-        std::vector<long> GPU_pressure_memory_estimation;
-        GPU_pressure_memory_estimation.resize(kernel_list.size());
-        long total_global_size;
-        for (int i = 0; i < kernel_list.size(); i++)
-        {
-            GPU_pressure_memory_estimation[i] = memory_offset_intermediate + memory_offset_weights + tensor_list[0]->size_in_byte;
-        }
-        for (int i = 0; i < tensor_list.size(); i++)
-        {
-            if (!tensor_list[i]->is_global_weight)
-            {
-                for (int j = 0; j < tensor_list[i]->live_interval[0]; j++)
-                {
-                    GPU_pressure_memory_estimation[j] -= tensor_list[i]->size_in_byte;
-                }
-                int death;
-                if (tensor_list[i]->live_interval[1]==-1)
-                {
-                    death = tensor_list[i]->live_interval[0]+1;
-                }else
-                {
-                    death = tensor_list[i]->live_interval[1];
-                }
-                
-                for (int j = death; j < kernel_list.size(); j++)
-                {
-                    GPU_pressure_memory_estimation[j] -= tensor_list[i]->size_in_byte;
-                }   
-            }
-        }
-
-        motiv_1 << "total = [";
-        for (int i = 0; i < kernel_list.size(); i++)
-        {
-            motiv_1<<GPU_pressure_memory_estimation[i]<<",";
-        }
-        motiv_1<<"]\n";
-
-        motiv_1 << "global_weight = " << memory_offset_weights << "\n";
-        motiv_1 << "input_size = " << tensor_list[0]->size_in_byte << "\n";
-        
-        motiv_1.close();
-
-        filenaeme = argv1+"_TensorPeriodLog.py";
-        std::ofstream motiv_2(filenaeme);
-        motiv_2 << "sd_size = [";
-        for (int i = 0; i < interval_list.size(); i++)
-        {
-            motiv_2<<interval_list[i]->the_tensor->size_in_byte;
-            motiv_2<<", ";
-        }
-        motiv_2<<"]\n";
-        motiv_2 << "sd_time = [";
-        for (int i = 0; i < interval_list.size(); i++)
-        {
-            motiv_2<<interval_list[i]->time_estimated;
-            motiv_2<<", ";
-        }
-        motiv_2<<"]\n";
-        motiv_2 << "# ";
-        for (int i = 0; i < interval_list.size(); i++)
-        {
-            motiv_2<<interval_list[i]->kernelLevel_interval[0];
-            motiv_2<<" ";
-        }
-
-
-        motiv_2.close();
-        
-        
-/***********************************Getting Motivation Number   End***************************************/
-
-
-        nprintf("Average interval time: %f ms\n\n", 
-                interval_list[(interval_list.size() - 1) / 2]->time_estimated);
-        
+        nprintf("Average interval time: %f ms\n", interval_list[(interval_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");
         Simulator::Stat stat(stat_output_file);
         if (!stat.outputFileExists()) {
@@ -967,12 +909,12 @@ int main(int argc, char *argv[]) {
                     Assert(kernel_list[i].pf_execution_cycles > 0);
                 }
             }
-            iprintf("\nSimulation\n", "");
+            iprintf("\nPerforming Simulation\n", "");
             Simulator::EventSimulator *sim = new Simulator::EventSimulator(stat_output_file);
             sim->run(num_iteration);
             delete sim; // make sure stats are written back to the files
         }
-        iprintf("\nAnalysis\n", "");
+        iprintf("\nPerforming Analysis\n", "");
         stat.prepareOutputFiles(true);
         stat.analyzeStat();
     } else {

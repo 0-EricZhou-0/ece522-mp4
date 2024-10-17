@@ -52,6 +52,13 @@ std::vector<Hidding_Interval*> offloeded_local_intervals;
 //flashneuron:
 std::priority_queue<fl_pending_event, std::vector<fl_pending_event>, Fl_event_less> fl_pending_event_queue;
 
+const std::unordered_map<std::string, CUDAKernelType> kernel_type_revmap = []() {
+    std::unordered_map<std::string, CUDAKernelType> ret;
+    for (unsigned type = 0; type < CUDAKernelType::NR_kernel_type; type++) {
+        ret.emplace(print_kerneltype_array[type], static_cast<CUDAKernelType>(type));
+    }
+    return ret;
+}();
 
 // extern const std::string print_pagelocation_array[5];
 
@@ -434,7 +441,7 @@ void transformer_op_datalow_pass(int borden){
                 
                 curr_op->output_tensor = new Tensor(size*4, global);
                 tensor_list.push_back(curr_op->output_tensor);
-                curr_op->output_tensor->print();
+                // curr_op->output_tensor->print();
                 transformer_tensors[curr_op->op_id].tensor = curr_op->output_tensor;
             }
             
@@ -450,7 +457,7 @@ void transformer_op_datalow_pass(int borden){
             
             curr_op->output_tensor = new Tensor(size*4, global);
             tensor_list.push_back(curr_op->output_tensor);
-            curr_op->output_tensor->print();
+            // curr_op->output_tensor->print();
         }
 
         //Allocate Input:
@@ -480,7 +487,7 @@ void transformer_op_datalow_pass(int borden){
                     
                     curr_op->input_tensors[j].tensor = new Tensor(size*4, global);
                     tensor_list.push_back(curr_op->input_tensors[j].tensor);
-                    curr_op->input_tensors[j].tensor->print();
+                    // curr_op->input_tensors[j].tensor->print();
                     transformer_tensors[id].tensor = curr_op->input_tensors[j].tensor;
                 }
             }else
@@ -548,10 +555,10 @@ void transformer_op_datalow_pass(int borden){
         
     }
 
-    for (int i = 0; i < forward_ops.size(); i++)
-    {
-        forward_ops[i]->print();
-    }
+    // for (int i = 0; i < forward_ops.size(); i++)
+    // {
+    //     forward_ops[i]->print();
+    // }
     
 }
 
@@ -926,6 +933,19 @@ CUDAKernel::CUDAKernel(CUDAKernelType t, Model_OP* op){
 }
 
 
+CUDAKernel::CUDAKernel(int kernel_id,
+                       CUDAKernelType t,
+                       std::vector<Tensor*> input_tensor_list,
+                       std::vector<Tensor*> output_tensor_list,
+                       Tensor* workspace_tensor) {
+    this->kernel_id = kernel_id;
+    this->type = t;
+    this->inputs.insert(input_tensor_list.begin(), input_tensor_list.end());
+    this->outputs.insert(output_tensor_list.begin(), output_tensor_list.end());
+    this->workspace = workspace;
+}
+
+
 void CUDAKernel::print(){
     std::cout<<"Kernel ID: "<<kernel_id<<", "<< "Name: "<<print_kerneltype_array[type]<<std::endl;
     if (this->parent_layer)
@@ -936,27 +956,27 @@ void CUDAKernel::print(){
             case OperatorType::AdaptiveAvgPool2d_T :
                 std::cout<<"AdaptiveAvgPool2d";
                 break;
-            
+
             case OperatorType::BatchNorm2d_T :
                 std::cout<<"BatchNorm2d";
                 break;
-            
+
             case OperatorType::Conv2d_T :
                 std::cout<<"Conv2d";
                 break;
-            
+
             case OperatorType::Dropout_T :
                 std::cout<<"Dropout";
                 break;
-            
+
             case OperatorType::Linear_T :
                 std::cout<<"Linear";
                 break;
-            
+
             case OperatorType::MaxPool2d_T :
                 std::cout<<"MaxPool2d";
                 break;
-            
+
             case OperatorType::ReLU_T :
                 std::cout<<"ReLU";
                 break;
@@ -977,30 +997,29 @@ void CUDAKernel::print(){
                 break;
         }
         std::cout<<std::endl;
+    } else if (parent_op) {
+        std::cout<<"Parent OP ID:"<<parent_op->op_id<<"; Name: "<<parent_op->type<<std::endl;
+    } else {
+        std::cout<<"No parent info"<<std::endl;
     }
-    else
-    {
-         std::cout<<"Parent OP ID:"<<parent_op->op_id<<"; Name: "<<parent_op->type<<std::endl;
-    }
-    
-    
-    std::cout<<"Execution Time: "<< execution_cycles<<std::endl;
+
+
+    std::cout<<"Execution Time:            "<< execution_cycles<<std::endl;
+    std::cout<<"Execution Time (input pf): "<< input_pf_execution_cycles<<std::endl;
+    std::cout<<"Execution Time (pf):       "<< pf_execution_cycles<<std::endl;
     if (this->parent_layer)
     {
         std::cout<<"("<<parent_layer->N<<","<<parent_layer->C<<","<<parent_layer->H<<","<<parent_layer->W<<")"<<std::endl;
     }
 
     std::cout<<"Input Tensors:"<<std::endl;
-    for (auto it = inputs.begin(); it != inputs.end(); it++)
-    {
+    for (auto it = inputs.begin(); it != inputs.end(); it++) {
         (*it)->print();
     }
     std::cout<<"Output Tensors:"<<std::endl;
-    for (auto it = outputs.begin(); it != outputs.end(); it++)
-    {
+    for (auto it = outputs.begin(); it != outputs.end(); it++) {
         (*it)->print();
     }
-    std::cout<<"____________________________________________________________________"<<std::endl;
 }
 
 void CUDAKernel::getRequiredTensors(std::vector<Tensor*> &required_tensors) const {
@@ -1029,6 +1048,24 @@ void CUDAKernel::getRequiredTensors(std::vector<Tensor*> &required_tensors,
   for (Tensor *tensor : outputs) {
     if (set.find(tensor) == set.end()) {
         required_tensors.push_back(tensor);
+        required_output_tensors.push_back(tensor);
+    }
+  }
+}
+
+void CUDAKernel::getRequiredTensors(std::vector<Tensor*> &required_input_tensors,
+                                    std::vector<Tensor*> &required_output_tensors,
+                                    Tensor*& required_workspace_tensors) const {
+  for (Tensor *tensor : inputs) {
+    required_input_tensors.push_back(tensor);
+  }
+  if (workspace) {
+    required_workspace_tensors = workspace;
+  } else {
+    required_workspace_tensors = nullptr;
+  }
+  for (Tensor *tensor : outputs) {
+    if (tensor != workspace) {
         required_output_tensors.push_back(tensor);
     }
   }

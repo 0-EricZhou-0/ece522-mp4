@@ -8,32 +8,35 @@
 #include <unordered_set>
 #include <set>
 #include <unordered_map>
+#include <map>
 #include <queue>
 
 
 typedef enum {
-    Conv2d_Forward, ReLU_Forward, MaxPool2d_Forward, AdaptiveAvgPool2d_Forward, Linear_Forward, 
+    Conv2d_Forward, ReLU_Forward, MaxPool2d_Forward, AdaptiveAvgPool2d_Forward, Linear_Forward,
     Dropout_Forward, BatchNorm2d_Forward, Conv2d_Backward_Weight, Conv2d_Backward_Input, Conv2d_Apply_Grad,
-    ReLU_Backward, MaxPool2d_Backward, AdaptiveAvgPool2d_Backward, Linear_Backward_Weight, Linear_Backward_Input, 
+    ReLU_Backward, MaxPool2d_Backward, AdaptiveAvgPool2d_Backward, Linear_Backward_Weight, Linear_Backward_Input,
     Linear_Backward_Bias, Linear_Apply_Grad_Bias, Linear_Apply_Grad_Weight, Dropout_Backward, BatchNorm2d_Backward,
     BatchNorm2d_Apply_Grad, LoadData_A0, makeLoss, Add_Forward, Add_MultiGredient, Concat_Forward, Concat_Backward,
-    Scale_Forward, Scale_Backward, GatherV2_Forward, GatherV2_Backward, Add_Backward, Divide_Forward, Divide_Backward_A, Divide_Backward_B, 
-    Multiply_Forward, Multiply_Backward, Power_Forward, Power_Backward, Sqrt_Forward, Sqrt_Backward, SoftmaxBasic_Forward, 
-    SoftmaxBasic_Backward, Subtract_Forward, Subtract_Backward, Sum_Forward, Sum_Backward, Tanh_Forward, Tanh_Backward, 
-    BatchMatMul_Forward, BatchMatMul_Backward, Apply_Grad, Erf_Forward, Erf_Backward
+    Scale_Forward, Scale_Backward, GatherV2_Forward, GatherV2_Backward, Add_Backward, Divide_Forward, Divide_Backward_A, Divide_Backward_B,
+    Multiply_Forward, Multiply_Backward, Power_Forward, Power_Backward, Sqrt_Forward, Sqrt_Backward, SoftmaxBasic_Forward,
+    SoftmaxBasic_Backward, Subtract_Forward, Subtract_Backward, Sum_Forward, Sum_Backward, Tanh_Forward, Tanh_Backward,
+    BatchMatMul_Forward, BatchMatMul_Backward, Apply_Grad, Erf_Forward, Erf_Backward, NR_kernel_type
 } CUDAKernelType;
 
-const std::string print_kerneltype_array [54] = {
-    "Conv2d_Forward", "ReLU_Forward", "MaxPool2d_Forward", "AdaptiveAvgPool2d_Forward", "Linear_Forward", 
+const std::string print_kerneltype_array [] = {
+    "Conv2d_Forward", "ReLU_Forward", "MaxPool2d_Forward", "AdaptiveAvgPool2d_Forward", "Linear_Forward",
     "Dropout_Forward", "BatchNorm2d_Forward", "Conv2d_Backward_Weight", "Conv2d_Backward_Input", "Conv2d_Apply_Grad",
-    "ReLU_Backward", "MaxPool2d_Backward", "AdaptiveAvgPool2d_Backward", "Linear_Backward_Weight", "Linear_Backward_Input", 
+    "ReLU_Backward", "MaxPool2d_Backward", "AdaptiveAvgPool2d_Backward", "Linear_Backward_Weight", "Linear_Backward_Input",
     "Linear_Backward_Bias", "Linear_Apply_Grad_Bias", "Linear_Apply_Grad_Weight", "Dropout_Backward", "BatchNorm2d_Backward",
     "BatchNorm2d_Apply_Grad", "LoadData_A0", "makeLoss", "Add_Forward", "Add_MultiGredient", "Concat_Forward", "Concat_Backward",
-    "Scale_Forward", "Scale_Backward", "GatherV2_Forward", "GatherV2_Backward", "Add_Backward", "Divide_Forward", "Divide_Backward_A", "Divide_Backward_B", 
-    "Multiply_Forward", "Multiply_Backward", "Power_Forward", "Power_Backward", "Sqrt_Forward", "Sqrt_Backward", "SoftmaxBasic_Forward", 
-    "SoftmaxBasic_Backward", "Subtract_Forward", "Subtract_Backward", "Sum_Forward", "Sum_Backward", "Tanh_Forward", "Tanh_Backward", 
+    "Scale_Forward", "Scale_Backward", "GatherV2_Forward", "GatherV2_Backward", "Add_Backward", "Divide_Forward", "Divide_Backward_A", "Divide_Backward_B",
+    "Multiply_Forward", "Multiply_Backward", "Power_Forward", "Power_Backward", "Sqrt_Forward", "Sqrt_Backward", "SoftmaxBasic_Forward",
+    "SoftmaxBasic_Backward", "Subtract_Forward", "Subtract_Backward", "Sum_Forward", "Sum_Backward", "Tanh_Forward", "Tanh_Backward",
     "BatchMatMul_Forward", "BatchMatMul_Backward", "Apply_Grad", "Erf_Forward", "Erf_Backward"
 };
+
+extern const std::unordered_map<std::string, CUDAKernelType> kernel_type_revmap;
 
 enum Eviction_P {
     Hot, Medium, Cold, Dead
@@ -53,9 +56,9 @@ class CUDAKernel {
         std::unordered_set<Tensor*> inputs;
         std::unordered_set<Tensor*> outputs;
         Tensor* workspace = nullptr;
-        
+
         /**
-         * @brief number of cycles for the kernel to execute assume all the tensors 
+         * @brief number of cycles for the kernel to execute assume all the tensors
          * are presented in the GPU memory and ready for computation.
          */
         long execution_cycles = -1;
@@ -64,11 +67,19 @@ class CUDAKernel {
 
         CUDAKernel(CUDAKernelType t, Model_Layer* layer);
         CUDAKernel(CUDAKernelType t, Model_OP* op_layer);
+        CUDAKernel(int kernel_id,
+                   CUDAKernelType t,
+                   std::vector<Tensor*> input_tensor_list,
+                   std::vector<Tensor*> output_tensor_list,
+                   Tensor* workspace_tensor);
         void getRequiredTensors(std::vector<Tensor*> &required_tensors) const;
         void getRequiredTensors(std::unordered_set<Tensor*> &required_tensors) const;
         void getRequiredTensors(std::vector<Tensor*> &required_tensors,
                                 std::vector<Tensor*> &required_input_tensors,
                                 std::vector<Tensor*> &required_output_tensors) const;
+        void getRequiredTensors(std::vector<Tensor*> &required_input_tensors,
+                                std::vector<Tensor*> &required_output_tensors,
+                                Tensor*& required_workspace_tensor) const;
         void getTensorBreakdown(std::vector<Tensor*> &inputs,
                                 std::vector<Tensor*> &weights,
                                 std::vector<Tensor*> &intermediates) const;

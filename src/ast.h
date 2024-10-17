@@ -330,7 +330,7 @@ class Tensor
 
         int tensor_id;
         long long size_in_byte;
-        long long raw_size_byte; 
+        long long raw_size_byte;
         long long address_offset;
         bool is_global_weight;
         bool is_choosed_to_evict = false;

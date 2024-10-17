@@ -77,7 +77,7 @@ extern double system_latency_us;
 extern double SSD_latency_us;
 
 namespace Simulator {
-  
+
 extern System *sim_sys;
 extern Stat *sim_stat;
 
@@ -288,28 +288,12 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       break;
     }
     case EvcPolicy::LRU: {
+      sim_sys->LRUSuggestInitialLRUBase();
       auto lru_it = sim_sys->getSuggestedLRUBase();
-      EvictCandidate &ret_candidate = get<3>(evicted_entry);
-      // perform magic
-      if (*lru_it >= memory_offset_intermediate + memory_offset_weights) {
-        lru_it = lru_addrs.begin();
-        eprintf("Perform Magic\n", "");
-      }
-      while (lru_it != lru_addrs.end() &&
-             sim_sys->CPU_PT.getEntry(*lru_it)->in_transfer) {
-        lru_it++;
-      }
-      if (lru_it == lru_addrs.end()) {
-        sim_sys->LRUSuggestInitialLRUBase();
-        lru_it = sim_sys->getSuggestedLRUBase();
-        while (lru_it != lru_addrs.end() &&
-              sim_sys->CPU_PT.getEntry(*lru_it)->in_transfer) {
-          lru_it++;
-        }
-      }
       Assert(lru_it != lru_addrs.end());
+
+      EvictCandidate &ret_candidate = get<3>(evicted_entry);
       ret_candidate.vpn = *lru_it;
-      sim_sys->storeSuggestedLRUBase(++lru_it);
       ret_candidate.tensor = searchTensorForPage(ret_candidate.vpn);
       ret_candidate.hotness = EvictionGuide_Table[kernel_id].entry[ret_candidate.tensor];
       ret_candidate.exact_hotness = ret_candidate.hotness == Eviction_P::Dead ? -1 :
@@ -363,127 +347,14 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       }
       break;
     }
-    case EvcPolicy::PERFECT_GUIDED: {
-      priority_queue<EvictCandidate, vector<EvictCandidate>, EvictCandidatePerfectComp> candidates;
-      for (int i = 0; i < candidate_cnt; i++) {
-        // select random entry
-        int bucket, bucket_size;
-        unordered_map<Addr, GPUPageTable::GPUPageTableEntry>::local_iterator rand_it;
-        do {
-          do { // magic that randomly select from unordered map in const time
-              bucket = rand() % page_table.bucket_count();
-              bucket_size = page_table.bucket_size(bucket);
-          } while (bucket_size == 0);
-          rand_it = std::next(page_table.begin(bucket), rand() % bucket_size);
-        } while (sim_sys->CPU_PT.getEntry(rand_it->first)->in_transfer);
-        // generate and add candidate to priority queue
-        EvictCandidate candidate;
-        candidate.vpn = rand_it->first;
-        candidate.tensor = searchTensorForPage(candidate.vpn);
-        candidate.hotness = EvictionGuide_Table[kernel_id].entry[candidate.tensor];
-        candidate.exact_hotness = candidate.hotness == Eviction_P::Dead ? -1 :
-            EvictionGuide_Table[kernel_id].absolute_time_entry[candidate.tensor];
-        candidates.emplace(candidate);
-      }
-      const EvictCandidate& target_candidate = candidates.top();
-      EvictCandidate &ret_candidate = get<3>(evicted_entry);
-      ret_candidate.vpn = target_candidate.vpn;
-      ret_candidate.tensor = target_candidate.tensor;
-      ret_candidate.hotness = target_candidate.hotness;
-      ret_candidate.exact_hotness = target_candidate.exact_hotness;
-
-      get<0>(evicted_entry) = target_candidate.vpn;
-      // get<1>(evicted_entry) = *getEntry(target_candidate.vpn);
-      get<1>(evicted_entry) = page_table[target_candidate.vpn];
-      if (target_candidate.hotness == Dead) {
-        get<2>(evicted_entry) = NOT_PRESENT;
-      } else if (target_candidate.hotness == Eviction_P::Hot) {
-        get<2>(evicted_entry) = IN_SSD;
-      } else if (target_candidate.hotness == Eviction_P::Medium) {
-        get<2>(evicted_entry) = IN_CPU;
-      } else if (target_candidate.hotness == Eviction_P::Cold) {
-        get<2>(evicted_entry) = IN_CPU;
-      }
-      break;
-    }
-    case EvcPolicy::GUIDED_LRU: {
-      priority_queue<EvictCandidate, vector<EvictCandidate>, EvictCandidateComp> candidates;
-      vector<Addr> candidate_addrs;
-      // FIXME: logic require redef
-      size_t actural_size = LRUGetLeastUsed(candidate_addrs, candidate_cnt);
-      for (int i = 0; i < actural_size; i++) {
-        EvictCandidate candidate;
-        candidate.vpn = candidate_addrs[i];
-        candidate.tensor = searchTensorForPage(candidate.vpn);
-        candidate.hotness = EvictionGuide_Table[kernel_id].entry[candidate.tensor];
-        candidate.exact_hotness = candidate.hotness == Eviction_P::Dead ? -1 :
-            EvictionGuide_Table[kernel_id].absolute_time_entry[candidate.tensor];
-        candidates.emplace(candidate);
-      }
-      const EvictCandidate& target_candidate = candidates.top();
-      EvictCandidate &ret_candidate = get<3>(evicted_entry);
-      ret_candidate.vpn = target_candidate.vpn;
-      ret_candidate.tensor = target_candidate.tensor;
-      ret_candidate.hotness = target_candidate.hotness;
-      ret_candidate.exact_hotness = target_candidate.exact_hotness;
-
-      get<0>(evicted_entry) = target_candidate.vpn;
-      // get<1>(evicted_entry) = *getEntry(target_candidate.vpn);
-      get<1>(evicted_entry) = page_table[target_candidate.vpn];
-      if (target_candidate.hotness == Dead) {
-        get<2>(evicted_entry) = NOT_PRESENT;
-      } else if (target_candidate.hotness == Eviction_P::Hot) {
-        get<2>(evicted_entry) = IN_SSD;
-      } else if (target_candidate.hotness == Eviction_P::Medium) {
-        get<2>(evicted_entry) = IN_CPU;
-      } else if (target_candidate.hotness == Eviction_P::Cold) {
-        get<2>(evicted_entry) = IN_CPU;
-      }
-      break;
-    }
-    case EvcPolicy::PERFECT_GUIDED_LRU: {
-      priority_queue<EvictCandidate, vector<EvictCandidate>, EvictCandidatePerfectComp> candidates;
-      vector<Addr> candidate_addrs;
-      // FIXME: logic require redef
-      size_t actural_size = LRUGetLeastUsed(candidate_addrs, candidate_cnt);
-      for (int i = 0; i < actural_size; i++) {
-        EvictCandidate candidate;
-        candidate.vpn = candidate_addrs[i];
-        candidate.tensor = searchTensorForPage(candidate.vpn);
-        candidate.hotness = EvictionGuide_Table[kernel_id].entry[candidate.tensor];
-        candidate.exact_hotness = candidate.hotness == Eviction_P::Dead ? -1 :
-            EvictionGuide_Table[kernel_id].absolute_time_entry[candidate.tensor];
-        candidates.emplace(candidate);
-      }
-      const EvictCandidate& target_candidate = candidates.top();
-      EvictCandidate &ret_candidate = get<3>(evicted_entry);
-      ret_candidate.vpn = target_candidate.vpn;
-      ret_candidate.tensor = target_candidate.tensor;
-      ret_candidate.hotness = target_candidate.hotness;
-      ret_candidate.exact_hotness = target_candidate.exact_hotness;
-
-      get<0>(evicted_entry) = target_candidate.vpn;
-      // get<1>(evicted_entry) = *getEntry(target_candidate.vpn);
-      get<1>(evicted_entry) = page_table[target_candidate.vpn];
-      if (target_candidate.hotness == Dead) {
-        get<2>(evicted_entry) = NOT_PRESENT;
-      } else if (target_candidate.hotness == Eviction_P::Hot) {
-        get<2>(evicted_entry) = IN_SSD;
-      } else if (target_candidate.hotness == Eviction_P::Medium) {
-        get<2>(evicted_entry) = IN_CPU;
-      } else if (target_candidate.hotness == Eviction_P::Cold) {
-        get<2>(evicted_entry) = IN_CPU;
-      }
-      break;
-    }
     case EvcPolicy::DEEPUM: {
       EvictCandidate &ret_candidate = get<3>(evicted_entry);
 
       if (!is_pf) {
+        sim_sys->LRUSuggestInitialLRUBase();
         auto lru_base_it = sim_sys->getSuggestedLRUBase();
         // not page faulted, skip LRUs that resident in running window
-        while (lru_base_it != lru_addrs.end() &&
-              sim_sys->pageInRunningWindowTensors(*lru_base_it)) {
+        while (lru_base_it != lru_addrs.end() && sim_sys->pageInRunningWindowTensors(*lru_base_it)) {
           lru_base_it++;
         }
         if (lru_base_it == lru_addrs.end()) {
@@ -498,8 +369,7 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       } else {
         auto lru_it = lru_addrs.begin();
         auto lru_base_it = sim_sys->getSuggestedLRUBase();
-        while (lru_it != lru_addrs.end() &&
-              sim_sys->CPU_PT.getEntry(*lru_it)->in_transfer) {
+        while (lru_it != lru_addrs.end() && sim_sys->CPU_PT.getEntry(*lru_it)->in_transfer) {
           lru_it++;
         }
         Assert(lru_it != lru_addrs.end());
@@ -516,14 +386,14 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
 
       get<0>(evicted_entry) = ret_candidate.vpn;
       if (page_table.find(ret_candidate.vpn) == page_table.end()) {
-        eprintf("VPN: %ld Tid: %d is_pf: %d\n", 
+        eprintf("VPN: %ld Tid: %d is_pf: %d\n",
             ret_candidate.vpn, ret_candidate.tensor->tensor_id, is_pf);
         Assert(false);
       }
       get<1>(evicted_entry) = page_table.at(ret_candidate.vpn);
       if (ret_candidate.tensor->is_alive(kernel_id))
         get<2>(evicted_entry) = IN_CPU;
-      else 
+      else
         get<2>(evicted_entry) = NOT_PRESENT;
       break;
     }
@@ -597,11 +467,11 @@ void GPUPageTable::LRURemove(Addr addr) {
   auto lru_item = lru_table.find(addr);
   bool change_suggestion = false;
   Assert(lru_item != lru_table.end());
-  if (lru_item->second == sim_sys->getSuggestedLRUBase()) 
+  if (lru_item->second == sim_sys->getSuggestedLRUBase())
     change_suggestion = true;
   lru_addrs.erase(lru_item->second);
   lru_table.erase(addr);
-  if (change_suggestion) 
+  if (change_suggestion)
     sim_sys->storeSuggestedLRUBase(lru_addrs.begin());
   // sanity check
   Assert(page_table.find(addr) == page_table.end());
@@ -630,7 +500,7 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
   char buf[100];
   snprintf(buf, sizeof(buf), "Total LRU Table size: %ld\n", lru_addrs.size());
   summary_out += string(buf);
-  
+
   Tensor *current_tensor = nullptr;
   int tensor_coalescing_cnt = 0;
   int hotness_coalescing_cnt = 0;
@@ -644,14 +514,14 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
       Eviction_P hotness = EvictionGuide_Table[kernel_id].entry[current_tensor];
       double exact_hotness = hotness == Eviction_P::Dead ? -1 :
           EvictionGuide_Table[kernel_id].absolute_time_entry[current_tensor];
-      snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n", 
+      snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n",
           tensor_coalescing_cnt, current_tensor->tensor_id, print_eviction_array[hotness].c_str(), exact_hotness);
       exact_out += string(buf);
-      
+
       if (EvictionGuide_Table[kernel_id].entry[tensor] == hotness) {
         hotness_coalescing_cnt += tensor_coalescing_cnt;
       } else {
-        snprintf(buf, sizeof(buf), "Num_pages:%10d Hotness:%7s\n", 
+        snprintf(buf, sizeof(buf), "Num_pages:%10d Hotness:%7s\n",
             hotness_coalescing_cnt + tensor_coalescing_cnt, print_eviction_array[hotness].c_str());
         summary_out += string(buf);
         hotness_coalescing_cnt = 0;
@@ -664,16 +534,16 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
   Eviction_P hotness = EvictionGuide_Table[kernel_id].entry[current_tensor];
   double exact_hotness = hotness == Eviction_P::Dead ? -1 :
       EvictionGuide_Table[kernel_id].absolute_time_entry[current_tensor];
-  snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n", 
+  snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n",
       tensor_coalescing_cnt, current_tensor->tensor_id, print_eviction_array[hotness].c_str(), exact_hotness);
   exact_out += string(buf);
   hotness_coalescing_cnt += tensor_coalescing_cnt;
 
-  snprintf(buf, sizeof(buf), "Num_pages:%10d Hotness:%7s\n", 
+  snprintf(buf, sizeof(buf), "Num_pages:%10d Hotness:%7s\n",
       hotness_coalescing_cnt, print_eviction_array[hotness].c_str());
   summary_out += string(buf);
-  
-  return "Tail (LRU)\n" + summary_out + "Head (MRU)\n" + "=====\n" + 
+
+  return "Tail (LRU)\n" + summary_out + "Head (MRU)\n" + "=====\n" +
          "Tail (LRU)\n" + exact_out + "Head (MRU)\n";
 }
 // GPUPageTable END ========================
@@ -821,7 +691,7 @@ bool System::pageInRunningWindowTensors(Addr start_address) {
 
 void System::deepUMSuggestInitialLRUBase() {
   current_lru_iterator = sim_sys->GPU_PT.lru_addrs.begin();
-  while (current_lru_iterator != sim_sys->GPU_PT.lru_addrs.end() && 
+  while (current_lru_iterator != sim_sys->GPU_PT.lru_addrs.end() &&
          sim_sys->pageInRunningWindowTensors(*current_lru_iterator)) {
     current_lru_iterator++;
   }
@@ -829,7 +699,7 @@ void System::deepUMSuggestInitialLRUBase() {
 
 void System::LRUSuggestInitialLRUBase() {
   current_lru_iterator = sim_sys->GPU_PT.lru_addrs.begin();
-  while (current_lru_iterator != sim_sys->GPU_PT.lru_addrs.end() && 
+  while (current_lru_iterator != sim_sys->GPU_PT.lru_addrs.end() &&
          sim_sys->CPU_PT.getEntry(*current_lru_iterator)->in_transfer) {
     current_lru_iterator++;
   }
@@ -881,7 +751,7 @@ void Stat::addKernelStat(int current_iter,
                          size_t GPU_used_pages,
                          const CUDAKernel *kernel) {
   vector<PageFaultInfo> info;
-  addKernelStat(current_iter, start_time, end_time, 
+  addKernelStat(current_iter, start_time, end_time,
       CPU_used_pages, GPU_used_pages, kernel, info);
 }
 
@@ -908,7 +778,7 @@ void Stat::addKernelStat(int current_iter,
   fout << current_iter << "+" << kernel->kernel_id <<
       ":[" << start_time << "," << end_time << "]" <<
       "(" << kernel->execution_cycles << "," << kernel->pf_execution_cycles << ")" <<
-      "<" << in_transfer_pages << "," << PF_from_CPU << "," << PF_from_SSD << "," << PF_unalloc << ">" << 
+      "<" << in_transfer_pages << "," << PF_from_CPU << "," << PF_from_SSD << "," << PF_unalloc << ">" <<
       "(" << CPU_used_pages << "," << GPU_used_pages << ")\n";
 }
 
@@ -925,7 +795,7 @@ void Stat::addPCIeBWStat(int current_iter,
 
   if (incoming_pg_num == 0 && outgoing_pg_num == 0)
     return;
-  
+
   Assert(incoming_pg_SSD + incoming_pg_CPU == incoming_pg_num &&
          outgoing_pg_SSD + outgoing_pg_CPU == outgoing_pg_num);
 
@@ -1098,7 +968,7 @@ void Stat::analyzeKernelStat() {
     // 0: iteration number        1: kernel id
     // 2: start time              3. end time
     // 4. ideal execution time    5. page-faulted execution time
-    // 6. in transfer page number 7.CPU page fault number 
+    // 6. in transfer page number 7.CPU page fault number
     // 8. SSD page fault number   9. unalloc page fault number
     // [10]. CPU page used        [11]. GPU page used
     long s_time = stol(stats[2]);
@@ -1180,7 +1050,7 @@ void Stat::analyzePCIeStat() {
       return;
     }
     // 0: iteration number        1: timestamp
-    // 2: alloc page number       
+    // 2: alloc page number
     // 3. incoming total page num 4. incoming SSD page num
     // 5. incoming CPU page num
     // 6. outgoing total page num 7. outgoing SSD page num
@@ -1228,9 +1098,9 @@ void Stat::analyzeEvcStat() {
       }
       out_str << "evc_stat.iter" << curit << ".total_evc = " << total_pf << "\n";
       for (auto it = curit_hotness.begin(); it != curit_hotness.end(); ++it) {
-        out_str << "evc_stat.iter" << curit << "." << print_eviction_array[it->first].c_str() << 
+        out_str << "evc_stat.iter" << curit << "." << print_eviction_array[it->first].c_str() <<
             " = " << it->second << "\n";
-        out_str << "evc_stat.iter" << curit << "." << print_eviction_array[it->first].c_str() << 
+        out_str << "evc_stat.iter" << curit << "." << print_eviction_array[it->first].c_str() <<
             "% = " << it->second * 100.0 / total_pf << "%\n";
       }
       printf("%s", out_str.str().c_str());
@@ -1246,9 +1116,9 @@ void Stat::analyzeEvcStat() {
       }
       out_str << "evc_stat.total.total_evc = " << total_pf << "\n";
       for (auto it = total_hotness.begin(); it != total_hotness.end(); ++it) {
-        out_str << "evc_stat.total." << print_eviction_array[it->first].c_str() << 
+        out_str << "evc_stat.total." << print_eviction_array[it->first].c_str() <<
             " = " << it->second << "\n";
-        out_str << "evc_stat.total." << print_eviction_array[it->first].c_str() << 
+        out_str << "evc_stat.total." << print_eviction_array[it->first].c_str() <<
             "% = " << it->second * 100.0 / total_pf << "%\n";
       }
       printf("%s", out_str.str().c_str());
@@ -1276,7 +1146,7 @@ void Stat::analyzeTransferBoundaryStat() {
   Assert(boundary_fin.good());
   Assert(breakdown_fout.good());
   Assert(final_fout.good());
-  
+
   vector<string> stats;
   long last_ending_time = 0;
   int total_kernel_num = 0;
@@ -1339,7 +1209,7 @@ void Stat::analyzeTransferBoundaryStat() {
   int transfer_time_idx = 0;
   int kernel_time_idx = 0;
   long current_kernel_transfer_time = 0;
-  while (transfer_time_idx < transfer_times.size() && 
+  while (transfer_time_idx < transfer_times.size() &&
          kernel_time_idx < kernel_times.size()) {
     pair<long, long> transfer_time = transfer_times[transfer_time_idx];
     pair<long, long> kernel_time = kernel_times[kernel_time_idx];
@@ -1356,7 +1226,7 @@ void Stat::analyzeTransferBoundaryStat() {
 
         long total_time = kernel_time.second - kernel_time.first;
         long ideal_time = ideal_kernel_times[kernel_idx];
-        
+
         long compute_time = total_time - current_kernel_transfer_time;
         long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
         long stall_time = total_time - ideal_time;
@@ -1367,7 +1237,7 @@ void Stat::analyzeTransferBoundaryStat() {
         iter_compute_times[iter_idx] += compute_time;
         iter_overlap_times[iter_idx] += overlap_time;
         iter_stall_times[iter_idx] += stall_time;
-        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" << 
+        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
             compute_time << "+" << overlap_time << "+" << stall_time << "\n";
         current_kernel_transfer_time = 0;
         kernel_time_idx++;
@@ -1381,7 +1251,7 @@ void Stat::analyzeTransferBoundaryStat() {
 
         long total_time = kernel_time.second - kernel_time.first;
         long ideal_time = ideal_kernel_times[kernel_idx];
-        
+
         long compute_time = total_time - current_kernel_transfer_time;
         long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
         long stall_time = total_time - ideal_time;
@@ -1392,7 +1262,7 @@ void Stat::analyzeTransferBoundaryStat() {
         iter_compute_times[iter_idx] += compute_time;
         iter_overlap_times[iter_idx] += overlap_time;
         iter_stall_times[iter_idx] += stall_time;
-        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" << 
+        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
             compute_time << "+" << overlap_time << "+" << stall_time << "\n";
         current_kernel_transfer_time = 0;
         kernel_time_idx++;
@@ -1409,7 +1279,7 @@ void Stat::analyzeTransferBoundaryStat() {
 
     long total_time = kernel_time.second - kernel_time.first;
     long ideal_time = ideal_kernel_times[kernel_idx];
-        
+
     long compute_time = total_time - current_kernel_transfer_time;
     long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
     long stall_time = total_time - ideal_time;
@@ -1420,18 +1290,18 @@ void Stat::analyzeTransferBoundaryStat() {
     iter_compute_times[iter_idx] += compute_time;
     iter_overlap_times[iter_idx] += overlap_time;
     iter_stall_times[iter_idx] += stall_time;
-    breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" << 
+    breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
         compute_time << "+" << overlap_time << "+" << stall_time << "\n";
     current_kernel_transfer_time = 0;
     kernel_time_idx++;
   }
   std::ostringstream out_str;
   for (int iter = 0; iter < 2; iter++) {
-    out_str << "total_time_breakdown_stall.iter" << iter << " = " << 
+    out_str << "total_time_breakdown_stall.iter" << iter << " = " <<
         iter_stall_times[iter] << "\n";
-    out_str << "total_time_breakdown_overlap.iter" << iter << " = " << 
+    out_str << "total_time_breakdown_overlap.iter" << iter << " = " <<
         iter_overlap_times[iter] << "\n";
-    out_str << "total_time_breakdown_executiuonOnly.iter" << iter << " = " << 
+    out_str << "total_time_breakdown_executiuonOnly.iter" << iter << " = " <<
         iter_compute_times[iter] << "\n";
   }
   printf("%s", out_str.str().c_str());

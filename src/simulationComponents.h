@@ -78,13 +78,13 @@ class CPUPageTable {
      * @param vpn VAddr of the page
      */
     void allocPTE(Addr vpn);
-    
+
     /**
      * @brief mark the page as transferring (IN_TRANSFER)
      * @param vpn VAddr of the page
      */
     void markInTransferPTE(Addr vpn);
-    
+
     /**
      * @brief mark the page as arrived (!IN_TRANSFER)
      * @param vpn VAddr of the page
@@ -102,7 +102,7 @@ class CPUPageTable {
      */
     bool haveInTransferPages();
     size_t numInTransferPages();
-    
+
     /**
      * @brief erase CPU PTE for page that is stored in host memory
      * @param vpn VAddr of the page
@@ -128,7 +128,7 @@ class CPUPageTable {
 
 class GPUPageTable {
   public:
-    enum EvcPolicy { RANDOM, LRU, GUIDED, PERFECT_GUIDED, GUIDED_LRU, PERFECT_GUIDED_LRU, DEEPUM };
+    enum EvcPolicy { RANDOM, LRU, GUIDED, DEEPUM };
     class GPUPageTableEntry {
       public:
         Addr ppn;
@@ -136,7 +136,7 @@ class GPUPageTable {
       private:
         Tensor *tensor;
     };
-    
+
     // eviction guide
     struct EvictCandidate {
         Addr vpn;
@@ -171,7 +171,7 @@ class GPUPageTable {
 
     bool isFull();
 
-    tuple<Addr, GPUPageTableEntry, PageLocation, EvictCandidate> 
+    tuple<Addr, GPUPageTableEntry, PageLocation, EvictCandidate>
         selectEvictPTE(int kernel_id, bool is_pf);
 
     pair<size_t, size_t> getCapacity();
@@ -194,7 +194,7 @@ class GPUPageTable {
     unordered_map<Addr, GPUPageTableEntry> page_table; // vpn -> entry
     set<Addr> phys_page_avail;    // ppn
     unordered_set<Addr> alloced_no_arrival; // vpn
-    
+
     // for eviction guide
     map<Addr, Tensor*> range_remap;
     // LRU
@@ -250,7 +250,7 @@ class GPUPageTable {
 // };
 
 
-//Input: 
+//Input:
 // t_00: Fully PF execution time from profiling (ms)
 // t_10: (InputPF) Output Fully PF time from profiling (ms)
 // t_11: no PF execution time from profiling (ms)
@@ -266,25 +266,25 @@ class GPUPageTable {
 // l_ssd: SSD latency (us)
 
 //Output:
-// delteT_PF: delta t for page fault handling (ms) 
-// BW_ssd_rest: The rest of SSD bandwidth useable when handling PF (for prefetching) (B/ms). Can be 0!! 
+// delteT_PF: delta t for page fault handling (ms)
+// BW_ssd_rest: The rest of SSD bandwidth useable when handling PF (for prefetching) (B/ms). Can be 0!!
 // BW_pcie_rest: The rest of PCIe bandwidth usable when handling PF (for prefetching) （B/ms. Can be 0!!
 
-void performance_model(double t_00, double t_10, double t_11, double r_input, double r_output, 
-                       double r_input_ssd, double r_output_ssd, long s_input, long s_output, 
-                       double BW_pcie, double BW_ssd, int l_sys, int l_ssd, 
+void performance_model(double t_00, double t_10, double t_11, double r_input, double r_output,
+                       double r_input_ssd, double r_output_ssd, long s_input, long s_output,
+                       double BW_pcie, double BW_ssd, int l_sys, int l_ssd,
                        double& deltaT_PF, double& BW_ssd_rest, double& BW_pcie_rest);
 
 
 class PageFaultInfo {
   public:
-    PageFaultInfo() : 
+    PageFaultInfo() :
         not_presented_input_pages(0), not_presented_output_pages(0),
         CPU_to_GPU_faulted_input_pages(0), SSD_to_GPU_faulted_input_pages(0),
         CPU_to_GPU_faulted_output_pages(0), SSD_to_GPU_faulted_output_pages(0),
         total_input_pages(0), total_output_pages(0),
         in_transfer_pages(0), kernel(nullptr) {}
-    PageFaultInfo(const CUDAKernel *kernel) : 
+    PageFaultInfo(const CUDAKernel *kernel) :
         not_presented_input_pages(0), not_presented_output_pages(0),
         CPU_to_GPU_faulted_input_pages(0), SSD_to_GPU_faulted_input_pages(0),
         CPU_to_GPU_faulted_output_pages(0), SSD_to_GPU_faulted_output_pages(0),
@@ -408,10 +408,10 @@ class System {
     void advanceCurrentKernel();
 
     int getMaxIteration();
-    
+
     /**
      * @brief get the current iteration number.
-     * 
+     *
      * @return int current iteration number
      */
     int getCurrentIteration();
@@ -420,11 +420,11 @@ class System {
 
     /**
      * @brief get current total page fault number
-     * 
+     *
      * @return size_t total pf number
      */
     size_t getCurrentTotalPF();
-    
+
     void generateRequiredTensorsForCurrentKernel();
     bool pageIsRequired(Addr start_address);
     bool tensorIsRequired(Tensor *tensor);
@@ -433,7 +433,7 @@ class System {
      * @brief DeepUM specific functions, adding the tensors of the target kernel into a set
      *        that contains tensors of several kernels in a running window that starts with
      *        the current executing kernel and spans for prefetch_degree
-     * 
+     *
      * @param kernel_num target kernel number where tensors of that kernel is added to the set
      */
     void addKernelTensorsToRunningWindow(int kernel_num);
@@ -444,7 +444,7 @@ class System {
     void clearRunningWindow();
     /**
      * @brief test if the target address is in the tensors contained in the running-window
-     * 
+     *
      * @param start_address address of the target page to be queried
      * @return if the target address in the running-window
      */
@@ -460,18 +460,18 @@ class System {
 
     /**
      * @brief update LRU base iterators
-     * 
-     * @param suggested_lru_iter 
+     *
+     * @param suggested_lru_iter
      */
     void storeSuggestedLRUBase(list<Addr>::iterator suggested_lru_iter);
-    
+
     /**
      * @brief get the stored LRU base iterators
      */
     list<Addr>::iterator getSuggestedLRUBase();
 
     KernelRescheduleInfo *reschedule_info;
-    
+
 
     int batcher_evt_print_current = 0;
     const int batcher_evt_print_max = 50000;
@@ -547,7 +547,7 @@ class Stat {
                              bool is_begin);
     void addSizeInfo(long raw, long aligned);
     void printSizeInfo();
-                         
+
     void prepareOutputFiles(bool final_only=false);
     bool outputFileExists();
     void analyzeStat();

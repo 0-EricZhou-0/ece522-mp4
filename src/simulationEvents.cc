@@ -267,12 +267,12 @@ unsigned long KernelBeginEvent::getPageFaultTime(PageFaultInfo &info) {
       info.CPU_to_GPU_faulted_input_pages, info.SSD_to_GPU_faulted_input_pages,
       info.CPU_to_GPU_faulted_output_pages, info.SSD_to_GPU_faulted_output_pages,
       input_pf_ratio, output_pf_ratio, input_pf_SSD_ratio, output_pf_SSD_ratio);
-  performance_model(kernel->pf_execution_cycles / sim_sys->GPU_frequency_Hz * 1000, 
-                    kernel->input_pf_execution_cycles / sim_sys->GPU_frequency_Hz * 1000, 
+  performance_model(kernel->pf_execution_cycles / sim_sys->GPU_frequency_Hz * 1000,
+                    kernel->input_pf_execution_cycles / sim_sys->GPU_frequency_Hz * 1000,
                     kernel->execution_cycles / sim_sys->GPU_frequency_Hz * 1000,
                     input_pf_ratio, output_pf_ratio, input_pf_SSD_ratio, output_pf_SSD_ratio,
                     input_tensor_size, output_tensor_size,
-                    sim_sys->GPU_PCIe_bandwidth_Bpc * sim_sys->GPU_frequency_Hz / 1000, 
+                    sim_sys->GPU_PCIe_bandwidth_Bpc * sim_sys->GPU_frequency_Hz / 1000,
                     sim_sys->SSD_PCIe_bandwidth_Bpc * sim_sys->GPU_frequency_Hz / 1000,
                     (int) sim_sys->system_latency, (int) sim_sys->SSD_latency,
                     deltaT_PF, BW_ssd_rest, BW_pcie_rest);
@@ -460,31 +460,30 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
 
 // Stall model BEGIN
 
-//Input: 
-// t_00: Fully PF execution time from profiling (ms)
-// t_10: (InputPF) Output Fully PF time from profiling (ms)
-// t_11: no PF execution time from profiling (ms)
-// r_input: the ratio of PF data in the input tensors (and not in-transfer)
-// r_output: the ratio of PF data in the output tensors (and not in-transfer)
-// r_input_ssd: the ratio of SSD PFs in the PFs (not in-transfer) in the input tensors
-// r_output_ssd: the ratio of SSD PFs in the PFs (not in-transfer) in the output tensors
-// s_input: total input tensor size (byte)
-// s_output: total output tensor size (byte)
-// BW_pcie: PCIe bandwidth (B/ms)
-// BW_ssd: SSD bandwidth (B/ms)
-// l_sys: System (CPU far-fault handling) latency (us)
-// l_ssd: SSD latency (us)
+/**
+ * Performance model
+ *  @param[in] t_00 Fully PF execution time from profiling (ms)
+ *  @param[in] t_10 (InputPF) Output Fully PF time from profiling (ms)
+ *  @param[in] t_11 no PF execution time from profiling (ms)
+ *  @param[in] r_input the ratio of PF data in the input tensors (and not in-transfer)
+ *  @param[in] r_output the ratio of PF data in the output tensors (and not in-transfer)
+ *  @param[in] r_input_ssd the ratio of SSD PFs in the PFs (not in-transfer) in the input tensors
+ *  @param[in] r_output_ssd the ratio of SSD PFs in the PFs (not in-transfer) in the output tensors
+ *  @param[in] s_input total input tensor size (byte)
+ *  @param[in] s_output total output tensor size (byte)
+ *  @param[in] BW_pcie PCIe bandwidth (B/ms)
+ *  @param[in] BW_ssd SSD bandwidth (B/ms)
+ *  @param[in] l_sys System (CPU far-fault handling) latency (us)
+ *  @param[in] l_ssd SSD latency (us)
+ *  @param[out] delteT_PF: delta t for page fault handling (ms)
+ *  @param[out] BW_ssd_rest: The rest of SSD bandwidth useable when handling PF (for prefetching) (B/ms)
+ *  @param[out] BW_pcie_rest: The rest of PCIe bandwidth usable when handling PF (for prefetching) （B/ms）
+ */
 
-//Output:
-// delteT_PF: delta t for page fault handling (ms)
-// BW_ssd_rest: The rest of SSD bandwidth useable when handling PF (for prefetching) (B/ms)
-// BW_pcie_rest: The rest of PCIe bandwidth usable when handling PF (for prefetching) （B/ms）
-
-void performance_model(double t_00, double t_10, double t_11, double r_input, double r_output, 
-                       double r_input_ssd, double r_output_ssd, long s_input, long s_output, 
-                       double BW_pcie, double BW_ssd, int l_sys, int l_ssd, 
+void performance_model(double t_00, double t_10, double t_11, double r_input, double r_output,
+                       double r_input_ssd, double r_output_ssd, long s_input, long s_output,
+                       double BW_pcie, double BW_ssd, int l_sys, int l_ssd,
                        double& deltaT_PF, double& BW_ssd_rest, double& BW_pcie_rest) {
-    
     Assert(r_input >= 0 && r_input <= 1);
     Assert(r_output >=0 && r_output <= 1);
     Assert(r_input_ssd >= 0 && r_input_ssd <= 1);
@@ -493,90 +492,53 @@ void performance_model(double t_00, double t_10, double t_11, double r_input, do
     double BW_cpu_in;
     double BW_cpu_out;
 
-    if (t_00 <= t_11)
-    {
-        t_00 = t_11;
-    }
-    if (t_10 < t_11)
-    {
-        t_10 = t_11;
-    }
-    if (t_10 > t_00)
-    {
-        t_10 = t_00;
-    }
+    if (t_00 <= t_11) t_00 = t_11;
+    if (t_10 < t_11)  t_10 = t_11;
+    if (t_10 > t_00)  t_10 = t_00;
 
-    if (t_00 == t_10)
-    {
+    if (t_00 == t_10) {
         BW_cpu_in = 1063004400;
-    }
-    else
-    {
+    } else {
         BW_cpu_in = s_input / (t_00 - t_10);
     }
-    if (t_10 == t_11)
-    {
+    if (t_10 == t_11) {
         BW_cpu_out = 1063004400;
-    }
-    else
-    {
+    } else {
         BW_cpu_out = s_output / (t_10 - t_11);
     }
 
     double BW_ssd_in = BW_cpu_in * l_sys / (l_sys + l_ssd);
     double BW_ssd_out = BW_cpu_out * l_sys / (l_sys + l_ssd);
 
-    if (BW_ssd_in > BW_ssd)
-    {
-        BW_ssd_in = BW_ssd;
-    }
-    if (BW_ssd_out > BW_ssd)
-    {
-        BW_ssd_out = BW_ssd;
-    }
-    if (r_input_ssd == 0)
-    {
-        BW_ssd_in = 0;
-    }
-    if (r_output_ssd == 0)
-    {
-        BW_ssd_out = 0;
-    }
-    
-    
+    if (BW_ssd_in > BW_ssd)  BW_ssd_in = BW_ssd;
+    if (BW_ssd_out > BW_ssd) BW_ssd_out = BW_ssd;
 
-    if (BW_cpu_in > BW_pcie - max(BW_ssd_in, BW_ssd_out))
-    {
+    if (r_input_ssd == 0)  BW_ssd_in = 0;
+    if (r_output_ssd == 0) BW_ssd_out = 0;
+
+    if (BW_cpu_in > BW_pcie - max(BW_ssd_in, BW_ssd_out)) {
         BW_cpu_in = BW_pcie - max(BW_ssd_in, BW_ssd_out);
     }
 
-    if (BW_cpu_out > BW_pcie - max(BW_ssd_in, BW_ssd_out))
-    {
+    if (BW_cpu_out > BW_pcie - max(BW_ssd_in, BW_ssd_out)) {
         BW_cpu_out = BW_pcie - max(BW_ssd_in, BW_ssd_out);
     }
 
     double ssd_input_pf_time;
     double ssd_output_pf_time;
-    
-    if (r_input_ssd==0)
-    {
+
+    if (r_input_ssd == 0) {
         ssd_input_pf_time = 0;
-    }
-    else
-    {
+    } else {
         ssd_input_pf_time = r_input*r_input_ssd*s_input/BW_ssd_in;
     }
 
-    if(r_output_ssd==0)
-    {
+    if(r_output_ssd == 0) {
         ssd_output_pf_time = 0;
-    }
-    else
-    {
+    } else {
         ssd_output_pf_time = r_output*r_output_ssd*s_output/BW_ssd_out;
     }
     double cpu_pf_time = r_input*(1-r_input_ssd)*s_input/BW_cpu_in + r_output*(1-r_output_ssd)*s_output/BW_cpu_out;
-    
 
     deltaT_PF = max(ssd_input_pf_time + ssd_output_pf_time, cpu_pf_time);
 

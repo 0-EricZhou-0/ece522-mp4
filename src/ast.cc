@@ -773,7 +773,6 @@ void transformer_parse(std::string filename){
             transformer_tensors[new_op->input_tensors[i].tensor_id] = new_op->input_tensors[i];
         }
         std::string garbage;
-        std::cout<<".";
         fin>>garbage;
         Assert(garbage=="-------------------");
         new_op->N = batch_size;

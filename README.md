@@ -12,7 +12,6 @@ The artifact can be executed on any x86 machine with at least 30 GB of main memo
 Use the following command to download the artifact:
 
 ```bash
-# TODO (Zenodo)
 git clone git@github.com:HieronZhang/G10-Artifact.git
 ```
 
@@ -21,12 +20,11 @@ git clone git@github.com:HieronZhang/G10-Artifact.git
 Install the following dependencies:
 ```bash
 sudo apt install flex bison tmux python3-pip
-pip3 install matplotlib networkx pandas PyPDF2
 ```
 
-Build G10 (the output executable is named `gpg`):
+Build G10 (the output executable is named `sim`):
 ```bash
-cd G10-Artifact/src
+cd src
 make clean
 make
 ```
@@ -46,11 +44,11 @@ Every configuration file specifies the DNN model and the batch size to be used, 
 
 To run a single experiment, directly find its corresponding config file and use ((use G10-(BERT, batchsize=256)) as an example)):
 ```bash
-./gpg "$relative_path_to_config_file"
-    # e.g.,  ./gpg configs/BERT/256-sim_prefetch_lru.config
+./sim "$relative_path_to_config_file"
+    # e.g.,  ./sim configs/BERT/256-sim_prefetch_lru.config
 ```
 
-The program will execute the Tensor Vitality Analysis and Smart Tensor Migration Algorithms, and do a performance simulation of the DNN training. The results will be generated in `"$G10_HOME"/results` directory. 
+The program will execute the Tensor Vitality Analysis and Smart Tensor Migration Algorithms, and do a performance simulation of the DNN training. The results will be generated in `"$G10_HOME"/results` directory.
 
 For each experiment, our program will generate separate logs for analyzed DNN graph information, tensor vitality analysis results, smart tensor migration scheduling, and performance simulation results. See `results/README.md` for more details of our program's output.
 
@@ -94,109 +92,14 @@ MAX_PROCESS_NUM=4
 # ---------------------------------------------------------------------------------------------
 ```
 
-## 3. Evaluation and Expected Results
-After specifying the `MAX_PROCESS_NUM`, to evaluate the artifact results, simply run:
-```bash
-./artifact_run.sh
-```
-
-This script runs all the experiments, data gathering, and figure drawing sequentially. A detailed description of each command and the output figures' position is also included in this script. 
-
-To run individual data gathering and figure drawing scripts, see lines 49-124 of `artifact_run.sh`:
-
-```bash
-#-------------------------------- Gathering Data -----------------------------------------------------------------------------------=
-
-# Collect all the numbers, store it in raw_output/data.json
-python3 gatherKernelInfo.py
-
-# Gather data for figure 11
-python3 figureDrawingDataPrepOverallPerformance.py  # The gathered data is stored in figure_drawing/overall_performance
-
-# Gather data for figure 12
-python3 figureDrawingDataPrepBreakdown.py  # The gathered data is stored in figure_drawing/overall_breakdown
-
-# Gather data for figure 13
-./figureDrawingDataPrepKernelCDF.sh  # The gathered data is stored in figure_drawing/overall_slowdown_cdf
-
-# Gather data for figure 14
-python3 figureDrawingDataPrepTraffic.py  # The gathered data is stored in figure_drawing/overall_traffic
-
-# Gather data for figure 15
-python3 figureDrawingDataPrep.py  # The gathered data is stored in figure_drawing/overall_batchsize
-
-# Gather data for figure 16
-python3 figureDrawingDataPrepCPUsensitivity.py  # The gathered data is stored in figure_drawing/sensitivity_cpumem
-
-# Gather data for figure 17
-python3 figureDrawingDataPrepCPUSensitivityCombined.py  # The gathered data is stored in figure_drawing/sensitivity_cpumem_combined
-
-# Gather data for figure 18
-python3 figureDrawingDataPrepSSD.py  # The gathered data is stored in figure_drawing/sensitivity_ssdbw
-
-# Gather data for figure 19
-python3 figureDrawingDataPrepVariation.py  # The gathered data is stored in figure_drawing/sensitivity_variation
-
-
-
-#-------------------------------- Drawing Figures -----------------------------------------------------------------------------------
-
-cd figure_drawing
-
-# Plot figures for Figure 2-4, and Figure 20-21 (Appendix)
-
-python3 plot_mem_consumption.py  # Figure 2 is output/dnn_memconsumption.pdf
-
-python3 plot_tensor_time_cdf.py  # Figure 3 is output/tensor_time_cdf.pdf
-
-python3 plot_tensor_period_distribution.py  # Figure 4 is output/tensor_periods_distribution.pdf
-
-python3 plot_detail_mem_breakdown_live.py  # Figure 20 is output/dnn_mem_consumption_breakdown_live.pdf
-
-python3 plot_detail_mem_breakdown_active.py  # Figure 21 is output/dnn_mem_consumption_breakdown_active.pdf
-
-# Draw Figure 11
-python3 overallPerf.py  # Figure 11 is output/OverallPerfNew.pdf
-
-# Draw Figure 12
-python3 overallBreakdown.py  # Figure 12 is output/Breakdown.pdf
-
-# Draw Figure 13
-python3 overallSlowdownCDF.py  # Figure 13 is output/KernelTimeCDF.pdf
-
-# Draw Figure 14
-python3 overallTraffic.py  # Figure 14 is output/OverallTraffic.pdf
-
-# Draw Figure 15
-python3 overallBatchSize.py  # Figure 15 is output/OverallPerfBatchSize.pdf
-
-# Draw Figure 16
-python3 sensitivityCPUMem.py  # Figure 16 is output/OverallPerfCPUMem.pdf
-
-# Draw Figure 17
-python3 sensitivityCPUMemCombined.py  # Figure 17 is output/OverallPerfCPUMemCombined.pdf
-
-# Draw Figure 18 
-python3 sensitivitySSDbw.py  # Figure 18 is output/OverallPerfSSDBW.pdf 
-
-# Draw Figure 19
-python3 SensitivityKernelVariation.py # Figure 19 is output/SensitivityVariation.pdf
-```
-
-We have provided the expected result files in the directory `example_results`. To verify the results, one can compare the generated figures directly with those in the paper, or compare the data for each figure with the example results we provided.
-
-
 ## 4. Experiment Customization
 
 ### 4.1 Changing Simulation Configurations
 In addition to the provided configurations, users can also customize their own config files and evaluate other settings. The simplest way to do this is to modify the `resources/genconfigs.py` script. Note that we only provided DNN training execution traces used in our paper. 
 
 ### 4.2 Custom DNN Training Profiling
-Users can also generate their own traces of DNN training on their own GPUs. It's also possible to generate traces for customized batch sizes. Custom profiling can be done by modifying the config files named "profile" rather than "sim", and running them with the G10 executable (`gpg`). Note that to do this, users have to first correctly install `CUDA` (11.0 and higher) Tool-kits with `cudnn` and `cublas` libraries. Before profiling, please make sure that the CUDA code generation part of our framework is built:
+Users can also generate their own traces of DNN training on their own GPUs. It's also possible to generate traces for customized batch sizes. Custom profiling can be done by modifying the config files named "profile" rather than "sim", and running them with the G10 executable (`sim`). Note that to do this, users have to first correctly install `CUDA` (11.0 and higher) Tool-kits with `cudnn` and `cublas` libraries. Before profiling, please make sure that the CUDA code generation part of our framework is built:
 ```bash
 cd G10-Artifact/src/cudnn
 make clean && make
 ```
-
-## 5. Licence
-This project is licenced under the terms of the Apache 2.0 licence.
