@@ -2,7 +2,7 @@
 #define __ANALYSIS_H__
 
 #include "ast.h"
-#include "simulationUtils.h"
+// #include "simulationUtils.h"
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -39,8 +39,49 @@ const std::string print_kerneltype_array [] = {
 
 extern const std::unordered_map<std::string, CUDAKernelType> kernel_type_revmap;
 
+
+
+class Inactive_period;
+class Tensor {
+    private:
+        Tensor();
+    public:
+        Tensor(long long size, bool glob = false);
+        unsigned long getGlobalOffset();
+        std::string name() const;
+        bool is_alive(int current_kernel) const;
+        void print() const;
+        void print_liveness();
+        void print_inactive_periods();
+
+        int tensor_id;
+        long long size_in_byte;  //Aligned with 4KB
+        long long raw_size_byte;
+        long long address_offset;
+        bool is_global_weight;   // If the tensor is a global tensor.
+        
+        //Following is the assess pattern information, which is not automatically filled with the model graph input.
+        int live_interval[2];   //TODO: Important:  Stores liveness information, live_interval[0] = the first kernel that used the tensor; live_interval[1] = (the last kernel that used the tensor) + 1.  Only intermediate tensor has meaningful liveness interval.
+        std::vector<Inactive_period*> inactive_periods;  //TODO: Important:  A vector of inactive periods of this tensor. With the start of inactive_period sorted in ascending order
+
+};
+
+class Inactive_period {
+  public:
+    int kernelLevel_interval[2];      //  kernelLevel_interval[0] =  the first kernel ID that the tensor is inactive,   kernelLevel_interval[1] = (the last kernel ID that the tensor is inactive) + 1;  kernelLevel_interval should at least at least contain one kernel.  e.g., 456----457
+    bool is_looped;             // If true, it means that the tensor is a global tensor, and kernelLevel_interval[0] > kernelLevel_interval[1].
+    Tensor* the_tensor;
+
+    double time_estimated;   //Important: we provided a compiler pass function to calculate the estimated execution time for every tensors' inactive period length(time)
+
+    Inactive_period(Tensor* t){the_tensor = t; is_looped = false; };
+    void print();
+};
+
+
+
 enum Eviction_P {
-    Hot, Medium, Cold, Dead
+    Hot, Medium, Cold, Dead, Invalid
 };
 
 const std::string print_eviction_array [4] = {
@@ -52,8 +93,7 @@ class CUDAKernel {
     public:
         int kernel_id;
         CUDAKernelType type;
-        // Model_Layer* parent_layer = nullptr;
-        // Model_OP* parent_op = nullptr;
+
         std::unordered_set<Tensor*> inputs;
         std::unordered_set<Tensor*> outputs;
         Tensor* workspace = nullptr;
@@ -62,17 +102,20 @@ class CUDAKernel {
          * @brief number of cycles for the kernel to execute assume all the tensors
          * are presented in the GPU memory and ready for computation.
          */
+        //Profiled ideal execution time
         long execution_cycles = -1;
+
         long pf_execution_cycles = -1;
         long input_pf_execution_cycles = -1;
 
-        // CUDAKernel(CUDAKernelType t, Model_Layer* layer);
-        // CUDAKernel(CUDAKernelType t, Model_OP* op_layer);
+
         CUDAKernel(int kernel_id,
                    CUDAKernelType t,
                    std::vector<Tensor*> input_tensor_list,
                    std::vector<Tensor*> output_tensor_list,
                    Tensor* workspace_tensor);
+
+        // Below used by simulators:
         void getRequiredTensors(std::vector<Tensor*> &required_tensors) const;
         void getRequiredTensors(std::unordered_set<Tensor*> &required_tensors) const;
         void getRequiredTensors(std::vector<Tensor*> &required_tensors,
@@ -95,147 +138,24 @@ class EvictionGuide_Entry {
 };
 
 
-class Offload_Hint_FlashNeuron {
-  public:
-    Offload_Hint_FlashNeuron(int issued_time, Tensor* tensor) :
-        issued_time(issued_time), tensor(tensor) {}
-
-    bool operator<(const Offload_Hint_FlashNeuron& rhs) const {
-      return issued_time < rhs.issued_time;
-    }
-
-    int issued_time;
-    Tensor* tensor;
-};
 
 
-struct flashneuron_PTE{
-    bool valid;
-};
-
-class FlashNeuron_memory_manager{
-    private:
-        std::vector<flashneuron_PTE> page_table;
-    public:
-        FlashNeuron_memory_manager(double GPUsize_GB);
-        int alloc_from_left(Tensor* tensor);
-        int alloc_from_right(Tensor* tensor);
-        long largest_available_size();
-        void dealloc_tensor(Tensor* tensor);
-        double util_cal();
-};
-
-
-typedef enum {
-    FlashNeuron, G10_GDS_SSD, G10_GDS_FULL
-} GDS_Baseline_Type;
-
-typedef enum {
-    Offload_Finish, Prefetch_Finish, Kernel_Finish, Offload_Finish_CPU, Prefetch_Finish_CPU
-} Fl_Pending_Event_Type;
-
-
-struct fl_pending_event{
-    Fl_Pending_Event_Type type;
-    double ready_time;
-    long event_id;
-};
-
-struct Fl_event_less
-{
-    bool operator() (const fl_pending_event a, const fl_pending_event b) const {
-        return (a.ready_time > b.ready_time);
-    }
-};
-
-// auto Fl_event_less = [](fl_pending_event a, fl_pending_event b) { return a.ready_time > b.ready_time; };
-
-struct fetch_wait
-{
-    Tensor* tensor;
-    Simulator::PageLocation source;
-};
-
-
-
-struct fl_fetch{
-    Tensor* tensor;
-    long event_id;
-    double estimated_time;
-    bool is_happening;
-};
-
-struct fl_offload{
-    Tensor* tensor;
-    long event_id;
-    bool is_happening;
-    double estimated_time;
-};
-
-class FlashNeuron_simulator{
-    public:
-        double total_sim_time; // ms
-        double total_trasfer_time;
-        double total_time_breakdown_stall;
-        double total_time_breakdown_overlap;
-        double total_time_breakdown_exe;
-        long total_offload_byte;
-        long total_fetch_byte;
-        double BW_ssd; // B/ms
-        double BW_pcie; // B/ms
-        long event_number = 0;
-        GDS_Baseline_Type baseline_type;
-        std::queue<fl_fetch> fl_fetch_queue;
-        std::queue<fl_fetch> fl_fetch_queue_cpu;
-        std::vector<double> fl_kernel_stall_normed;
-        std::deque<fl_offload> fl_offload_queue;
-        std::deque<fl_offload> fl_offload_queue_cpu;
-        std::queue<fetch_wait> fetch_allocate_waiting_queue;
-        std::set<Tensor*> fetch_allocate_waiting_tensors;
-        std::set<Tensor*> cpu_tensors;
-        FlashNeuron_memory_manager mem_manager;
-        FlashNeuron_simulator(double BW_ssd_GBs, double BW_pcie_GBs, double GPU_size_GB, GDS_Baseline_Type type);
-        void run();
-
-        // return 0 for success, return 1 for failure, return 2 for stalled by kernel
-        int serve_one_pending_event(int kernel_event_id);
-        void check_fetch_allocation();
-};
-
-// //Transformers:
-// void transformer_op_datalow_pass(int borden);
-
-
-
-// void layer_pre_pass_datasize();
-
-// void layer_first_pass_dataflow();
-
-// void layer_second_pass_scheduling_kernels();
-
-// void transformer_scheduling_kernels();
-
+// Important Compiler pass functions:
+//TODO:
 void tensor_first_pass_liveness_analysis();
 
+//TODO:
 void tensor_second_pass_interval_formation();
 
-void get_interval_time();
+//Provided
+void get_inactive_periods_time();
 
-void give_eviction_guide();
 
-void print_eviction_guide_table();
-
+//TODO:
 void scheduling_prefetch();
 
-int scheduling_offload_flashneuron();
 
-void print_offloading_flashneuron();
-
-double simulate_flashneuron();
-
-void print_prefetch_table();
-
-void print_GPU_mem_estimation();
+// void print_GPU_mem_estimation();
 
 void print_GPU_mem_really_in_use();
 

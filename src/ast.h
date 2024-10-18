@@ -36,50 +36,5 @@
 #include <vector>
 #include <assert.h>
 
-class Hidding_Interval;
-class Tensor {
-    private:
-        Tensor();
-    public:
-        Tensor(long long size, bool glob = false);
-        unsigned long getGlobalOffset();
-        std::string name() const;
-        bool is_alive(int current_kernel) const;
-        void print() const;
-        void print_liveness();
-        void print_intervals();
-
-        int tensor_id;
-        long long size_in_byte;
-        long long raw_size_byte;
-        long long address_offset;
-        bool is_global_weight;
-        bool is_choosed_to_evict = false;
-        int live_interval[2]; //live_interval[0] = birth; live_interval[1] = death; if death=-1, it means that this tensor is always dead
-        std::vector<Hidding_Interval*> hidding_intervals;
-
-    //Flashneuron only: (starts with 'f')
-        bool f_is_allocated_on_GPU = false;
-        bool f_is_choosed_to_offload = false;
-        bool f_is_fetching = false;
-        long f_page_range[2];
-};
-
-class Hidding_Interval {
-  public:
-    double time_estimated;   //us
-    int kernelLevel_interval[2];
-    int original_prefetch_index;
-    int evict_finish_index;
-    bool is_looped;
-    bool is_offloaded;
-    bool is_really_offloaded;
-    long GPU_mem_line;
-    Tensor* the_tensor;
-    Hidding_Interval(Tensor* t, long GPU_line){the_tensor = t; is_looped = false; is_offloaded = false; is_really_offloaded =false; GPU_mem_line = GPU_line; original_prefetch_index = -1; evict_finish_index = -1;};
-    void print();
-};
-
-
 
 #endif

@@ -275,9 +275,8 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       EvictCandidate &ret_candidate = get<3>(evicted_entry);
       ret_candidate.vpn = rand_it->first;
       ret_candidate.tensor = searchTensorForPage(ret_candidate.vpn);
-      ret_candidate.hotness = EvictionGuide_Table[kernel_id].entry[ret_candidate.tensor];
-      ret_candidate.exact_hotness = ret_candidate.hotness == Eviction_P::Dead ? -1 :
-          EvictionGuide_Table[kernel_id].absolute_time_entry[ret_candidate.tensor];
+      ret_candidate.hotness = Eviction_P::Invalid;
+      ret_candidate.exact_hotness = Eviction_P::Invalid;
 
       get<0>(evicted_entry) = rand_it->first;
       get<1>(evicted_entry) = rand_it->second;
@@ -293,9 +292,8 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       EvictCandidate &ret_candidate = get<3>(evicted_entry);
       ret_candidate.vpn = *lru_it;
       ret_candidate.tensor = searchTensorForPage(ret_candidate.vpn);
-      ret_candidate.hotness = EvictionGuide_Table[kernel_id].entry[ret_candidate.tensor];
-      ret_candidate.exact_hotness = ret_candidate.hotness == Eviction_P::Dead ? -1 :
-          EvictionGuide_Table[kernel_id].absolute_time_entry[ret_candidate.tensor];
+      ret_candidate.hotness = Eviction_P::Invalid;
+      ret_candidate.exact_hotness = Eviction_P::Invalid;
 
       get<0>(evicted_entry) = ret_candidate.vpn;
       get<1>(evicted_entry) = page_table.at(ret_candidate.vpn);
@@ -320,9 +318,8 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
         EvictCandidate candidate;
         candidate.vpn = rand_it->first;
         candidate.tensor = searchTensorForPage(candidate.vpn);
-        candidate.hotness = EvictionGuide_Table[kernel_id].entry[candidate.tensor];
-        candidate.exact_hotness = candidate.hotness == Eviction_P::Dead ? -1 :
-            EvictionGuide_Table[kernel_id].absolute_time_entry[candidate.tensor];
+        candidate.hotness = Eviction_P::Invalid;
+        candidate.exact_hotness = Eviction_P::Invalid;
         candidates.emplace(candidate);
       }
       const EvictCandidate& target_candidate = candidates.top();
@@ -378,9 +375,8 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       }
 
       ret_candidate.tensor = searchTensorForPage(ret_candidate.vpn);
-      ret_candidate.hotness = EvictionGuide_Table[kernel_id].entry[ret_candidate.tensor];
-      ret_candidate.exact_hotness = ret_candidate.hotness == Eviction_P::Dead ? -1 :
-          EvictionGuide_Table[kernel_id].absolute_time_entry[ret_candidate.tensor];
+      ret_candidate.hotness = Eviction_P::Invalid;
+      ret_candidate.exact_hotness = Eviction_P::Invalid;
 
       get<0>(evicted_entry) = ret_candidate.vpn;
       if (page_table.find(ret_candidate.vpn) == page_table.end()) {

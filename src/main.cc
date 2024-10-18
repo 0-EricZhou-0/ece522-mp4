@@ -75,7 +75,7 @@ extern long long memory_offset_weights;
 // extern std::vector<Model_OP*> forward_ops;
 extern std::vector<CUDAKernel> kernel_list;
 extern std::vector<Tensor*> tensor_list;
-extern std::vector<Hidding_Interval*> interval_list;
+extern std::vector<Inactive_period*> inactive_periods_list;
 extern std::vector<EvictionGuide_Entry> EvictionGuide_Table;
 extern std::vector<long> GPU_resident_memory_estimation;
 extern std::vector<double> kernel_time_table;
@@ -525,13 +525,13 @@ int main(int argc, char *argv[]) {
 
         tensor_first_pass_liveness_analysis();
         tensor_second_pass_interval_formation();
-        get_interval_time();
+        get_inactive_periods_time();
 
         // life cycle info
         r = new RedirStdOut("interval.config");
         for (int i = 0; i < tensor_list.size(); i++) {
             tensor_list[i]->print_liveness();
-            tensor_list[i]->print_intervals();
+            tensor_list[i]->print_inactive_periods();
         }
         delete r;
 
@@ -560,7 +560,7 @@ int main(int argc, char *argv[]) {
         //     delete r;
         // }
 
-        nprintf("Average interval time: %f ms\n", interval_list[(interval_list.size() - 1) / 2]->time_estimated);
+        // nprintf("Average interval time: %f ms\n", inactive_periods_list[(inactive_periods_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");
         Simulator::Stat stat(stat_output_file);
         if (!stat.outputFileExists()) {

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cstdint>
+#include "analysis.h"
 
 using std::string;
 
