@@ -24,7 +24,7 @@ extern double GPU_memory_size_GB;
 extern double CPU_PCIe_bandwidth_GBps;
 extern double SSD_PCIe_bandwidth_GBps;
 extern double GPU_malloc_uspB;
-extern double GPU_free_uspB;
+// extern double GPU_free_uspB;
 extern int prefetch_degree;
 extern int borden;
 extern int is_transformer;

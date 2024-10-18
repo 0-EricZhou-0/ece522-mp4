@@ -48,11 +48,9 @@ extern double GPU_PCIe_bandwidth_GBps;
 extern double GPU_frequency_GHz;
 extern double GPU_memory_size_GB;
 extern double GPU_malloc_uspB;
-extern double GPU_free_uspB; // NOT USED FOR NOW
 // SSD sim param
 extern double SSD_PCIe_bandwidth_GBps;
 // PCIe sim param
-extern double PCIe_latency_us;  // NOT USED FOR NOW
 extern int PCIe_batch_size_in_page;
 // Other sim param
 extern bool use_prefetch;
@@ -62,7 +60,8 @@ extern Simulator::MigPolicy migration_policy;
 extern Simulator::GPUPageTable::EvcPolicy eviction_policy;
 extern int prefetch_degree;
 extern int num_candidate;
-extern double system_latency_us; // NOT USED FOR NOW
+extern double system_latency_us;
+extern bool is_ideal;
 
 // Other param
 //   In codegen, is_UVM specifies whether to use cudaMallocManaged
@@ -95,17 +94,11 @@ extern std::vector<EvictionGuide_Entry> EvictionGuide_Table;
 extern std::vector<long> GPU_resident_memory_estimation;
 extern std::vector<double> kernel_time_table;
 
-// output specifications
-std::string nn_model_input_file;
-std::string orig_kernel_time_file;
-std::string input_pf_kernel_time_file;
-std::string workspace_size_file;
-std::string pf_kernel_time_file;
-
+// input specifications
 std::string tensor_info_file;
 std::string kernel_info_file;
 std::string kernel_aux_time_file;
-
+// output specifications
 std::string stat_output_file;
 std::string output_folder_name;
 // simulation switches
@@ -192,7 +185,6 @@ void SimulationParamSanityCheck() {
     CheckVar(GPU_frequency_GHz, "GPU_frequency_GHz");
     CheckVar(GPU_memory_size_GB, "GPU_memory_size_GB");
     CheckVar(GPU_malloc_uspB, "GPU_malloc_uspB");
-    CheckVar(GPU_free_uspB, "GPU_free_uspB");
     CheckVar(CPU_memory_line_GB, "CPU_memory_line_GB");
 
     if (migration_policy == Simulator::MigPolicy::DEEPUM)
@@ -273,63 +265,6 @@ void SetupOutputFolder() {
     }
 }
 
-void exportKernelInfo(string dnn_type, int batch_size) {
-    string output_path = "../results_modified/" + dnn_type + "/sim_input/";
-    Assert(system(("mkdir -p " + output_path).c_str()) == 0);
-    double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
-    FILE* fout;
-
-    fout = fopen((output_path + to_string(batch_size) + "Tensor.info").c_str(), "w");
-    Assert(fout);
-    for (Tensor* tensor : tensor_list) {
-        fprintf(fout, "%d %lld %s\n", tensor->tensor_id, tensor->raw_size_byte, tensor->is_global_weight ? "true" : "false");
-    }
-    fflush(fout);
-    fclose(fout);
-
-    fout = fopen((output_path + to_string(batch_size) + "Kernel.info").c_str(), "w");
-    Assert(fout);
-    for (CUDAKernel &kernel : kernel_list) {
-        std::vector<Tensor*> required_input_tensors;
-        std::vector<Tensor*> required_output_tensors;
-        Tensor* required_workspace_tensor;
-
-        kernel.getRequiredTensors(required_input_tensors, required_output_tensors, required_workspace_tensor);
-
-        int item_cnt = 0;
-        fprintf(fout, "%d %s %.6f [", kernel.kernel_id, print_kerneltype_array[kernel.type].c_str(),
-            kernel.execution_cycles / GPU_frequency_Hz * 1000);
-        item_cnt = 0;
-        for (Tensor *t : required_input_tensors) {
-            fprintf(fout, "%s%d", item_cnt ? "," : "", t->tensor_id);
-            item_cnt++;
-        }
-        fprintf(fout, "] [");
-        item_cnt = 0;
-        for (Tensor *t : required_output_tensors) {
-            fprintf(fout, "%s%d", item_cnt ? "," : "", t->tensor_id);
-            item_cnt++;
-        }
-        if (required_workspace_tensor) {
-            fprintf(fout, "] %d\n", required_workspace_tensor->tensor_id);
-        } else {
-            fprintf(fout, "]\n");
-        }
-    }
-    fflush(fout);
-    fclose(fout);
-
-    fout = fopen((output_path + to_string(batch_size) + "AuxTime.info").c_str(), "w");
-    Assert(fout);
-    for (CUDAKernel &kernel : kernel_list) {
-        fprintf(fout, "%d %.6f %.6f\n", kernel.kernel_id,
-            (double) kernel.input_pf_execution_cycles / GPU_frequency_Hz * 1000,
-            (double) kernel.pf_execution_cycles / GPU_frequency_Hz * 1000);
-    }
-    fflush(fout);
-    fclose(fout);
-}
-
 void loadKernelInfo() {
     double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
     std::string line;
@@ -353,7 +288,6 @@ void loadKernelInfo() {
                 std::stoll(tensor_size), tensor_global == "true"
             ));
         }
-        iprintf("Total %d tensors found\n", tensor_list.size());
     } {
         // load kernel info
         std::ifstream kinfo_fin(kernel_info_file);
@@ -370,7 +304,7 @@ void loadKernelInfo() {
 
             std::vector<Tensor*> inputs;
             std::vector<Tensor*> outputs;
-            Tensor* workspace_tensor;
+            Tensor* workspace_tensor = nullptr;
 
             auto list_to_vec_tensor = [](std::vector<Tensor*> &vec_tensor, const std::string &str_list) {
                 Assert(str_list.front() == '[' && str_list.back() == ']');
@@ -387,9 +321,14 @@ void loadKernelInfo() {
             // output tensor list
             list_to_vec_tensor(outputs, output_tensor_list);
             // workspace tensor
-            Assert(std::stoi(workspace) < tensor_list.size());
-            workspace_tensor = workspace.size() ? tensor_list[std::stoi(workspace)] : nullptr;
-            if (workspace_tensor) outputs.push_back(workspace_tensor);
+            if (workspace.size()) {
+                int workspace_tensor_idx = std::stoi(workspace);
+                Assert(workspace_tensor_idx < tensor_list.size());
+                workspace_tensor = tensor_list[std::stoi(workspace)];
+                outputs.push_back(workspace_tensor);
+            } else {
+                workspace_tensor = nullptr;
+            }
 
             // populate kernel list
             kernel_list.push_back(CUDAKernel(
@@ -397,7 +336,6 @@ void loadKernelInfo() {
             ));
             kernel_list.back().execution_cycles = std::stod(exe_time) * GPU_frequency_Hz / 1000.0;
         }
-        iprintf("Total %d kernels found\n", kernel_list.size());
     } {
         // load kernel aux info
         std::ifstream auxtime_fin(kernel_aux_time_file);
@@ -427,133 +365,15 @@ void loadKernelInfo() {
             Assert(kernel_list[kernel_idx].pf_execution_cycles >= kernel_list[kernel_idx].input_pf_execution_cycles);
         }
     }
+    iprintf("Total %d tensors found\n", tensor_list.size());
+    iprintf("Total %d kernels found\n", kernel_list.size());
+    iprintf("Simulation data loading done\n", "");
 }
 
-void loadWorkspaceSizes() {
-    std::ifstream wok_f(workspace_size_file);
-    Assert(wok_f.good());
-
-    int kernel_id;
-    string workspace_size_str;
-    string unit;
-    size_t workspace_size;
-    iprintf("Loading workspace sizes from file <%s> for %d kernels\n",
-            workspace_size_file.c_str(), kernel_list.size());
-    for (int i = 0; i < kernel_list.size(); i++) {
-        workspace_size_str = "";
-        wok_f >> kernel_id >> workspace_size_str >> unit;
-        Assert(kernel_id == i);
-        Assert(workspace_size_str != "");
-        Assert(unit == "B");
-        workspace_size = std::stoull(workspace_size_str);
-        Assert(workspace_size >= 0);
-        if (workspace_size > 0) {
-            kernel_list[i].workspace = new Tensor(workspace_size, false);
-            kernel_list[i].outputs.insert(kernel_list[i].workspace);
-            tensor_list.push_back(kernel_list[i].workspace);
-        }
-    }
-    iprintf("Loading workspace sizes done\n", "");
-}
-
-void loadKernelTimes() {
-    double GPU_frequency_Hz = GPU_frequency_GHz * pow(10, 9);
-
-    std::ifstream orig_f(orig_kernel_time_file);
-    std::ifstream pf_f(pf_kernel_time_file);
-    std::ifstream inputpf_f(input_pf_kernel_time_file);
-    Assert(orig_f.good());
-    Assert(pf_f.good());
-    Assert(inputpf_f.good());
-
-    int kernel_num;
-    string exe_time_ms_str;
-    string unit;
-    // read in all the execution times
-    long exe_time_cycle;
-    double total_time = 0, pf_total_time = 0, input_pf_total_time = 0;
-    unsigned long total_time_cycle = 0, pf_total_time_cycle = 0, input_pf_total_time_cycle = 0;
-    iprintf("Loading kernel times from file <%s> and <%s> and <%s> for %d kernels\n",
-            orig_kernel_time_file.c_str(), pf_kernel_time_file.c_str(), input_pf_kernel_time_file.c_str(), kernel_list.size());
-    if (kernel_speedup != 1) {
-        iprintf("Using kernel speedup of %.4fx\n", kernel_speedup);
-    }
-    for (int i = 0; i < kernel_list.size(); i++) {
-        double delta_execution_time;
-        // read in ideal execution time from file
-        exe_time_ms_str.clear();
-        orig_f >> kernel_num >> exe_time_ms_str >> unit;
-        Assert(kernel_num == i);
-        Assert(exe_time_ms_str != "");
-        Assert(unit == "ms");
-        exe_time_cycle = std::stod(exe_time_ms_str) * GPU_frequency_Hz / 1000.0;
-        delta_execution_time = exe_time_cycle - exe_time_cycle / kernel_speedup;
-        kernel_list[i].execution_cycles = exe_time_cycle - delta_execution_time;
-        Assert(kernel_list[i].execution_cycles > 0);
-        total_time += kernel_list[i].execution_cycles / GPU_frequency_Hz * 1000;
-        total_time_cycle += exe_time_cycle;
-        // read in input_pf execution time from file
-        exe_time_ms_str.clear();
-        inputpf_f >> kernel_num >> exe_time_ms_str >> unit;
-        Assert(kernel_num == i);
-        Assert(exe_time_ms_str != "");
-        Assert(unit == "ms");
-        exe_time_cycle = std::stod(exe_time_ms_str) * GPU_frequency_Hz / 1000.0;
-        kernel_list[i].input_pf_execution_cycles = exe_time_cycle - delta_execution_time;
-        if (kernel_list[i].input_pf_execution_cycles < kernel_list[i].execution_cycles)
-            kernel_list[i].input_pf_execution_cycles = kernel_list[i].execution_cycles;
-        // read in pf execution time from file
-        exe_time_ms_str.clear();
-        pf_f >> kernel_num >> exe_time_ms_str >> unit;
-        Assert(kernel_num == i);
-        Assert(exe_time_ms_str != "");
-        Assert(unit == "ms");
-        exe_time_cycle = std::stod(exe_time_ms_str) * GPU_frequency_Hz / 1000.0;
-        kernel_list[i].pf_execution_cycles = exe_time_cycle - delta_execution_time;
-        if (kernel_list[i].pf_execution_cycles < kernel_list[i].input_pf_execution_cycles)
-            kernel_list[i].pf_execution_cycles = kernel_list[i].input_pf_execution_cycles;
-        Assert(kernel_list[i].pf_execution_cycles > 0);
-        Assert(exe_time_cycle > 0);
-        pf_total_time += kernel_list[i].pf_execution_cycles / GPU_frequency_Hz * 1000;
-        pf_total_time_cycle += exe_time_cycle;
-        Assert(kernel_list[i].input_pf_execution_cycles > 0);
-    }
-    nprintf("Total time (Ideal): %f ms %lu cycles; (PF): %f ms %lu cycles\n", 
-            total_time, total_time_cycle, pf_total_time, pf_total_time_cycle);
-    // make sure kernel times file have no other entries left
-    exe_time_ms_str = "";
-    orig_f >> exe_time_ms_str;
-    Assert(exe_time_ms_str == "");
-    // make sure pf kernel times file have no other entries left
-    exe_time_ms_str = "";
-    pf_f >> exe_time_ms_str;
-    Assert(exe_time_ms_str == "");
-    // make sure inputpf kernel times file have no other entries left
-    exe_time_ms_str = "";
-    inputpf_f >> exe_time_ms_str;
-    Assert(exe_time_ms_str == "");
-    iprintf("Loading kernel times done\n", "");
-}
-
-/* Function: main()
- * ----------------
- * Entry point to the entire program.  We parse the command line and turn
- * on any debugging flags requested by the user when invoking the program.
- * InitScanner() is used to set up the scanner.
- * InitParser() is used to set up the parser. The call to yyparse() will
- * attempt to parse a complete program from the input.
- */
-int main(int argc, char *argv[]) {
-    // config file should be the first argument
-    if (argc == 1) {
-        eprintf("Please specify a config file\n", "");
-        Assert(false);
-    }
-    // exit if config file does not exist
-    std::string config_file_path = string(argv[1]);
+void parse_config_args(std::string config_file_path) {
     std::ifstream config_file(config_file_path);
     if (!config_file.good()) {
-        eprintf("Config file <%s> does not exist\n", argv[1]);
+        eprintf("Config file <%s> does not exist\n", config_file_path.c_str());
         Assert(false);
     }
     // parse config file
@@ -593,19 +413,11 @@ int main(int argc, char *argv[]) {
         else if (command == "num_threads")              { num_threads = std::stoi(value); }
         else if (command == "is_input_pf_only")         { is_input_pf_only = std::stoi(value) != 0; }
         // simulation general settings
-        else if (command == "is_UVM")                   { is_UVM = std::stoi(value) != 0; }
+        else if (command == "is_ideal")                 { is_ideal = std::stoi(value) != 0; }
         else if (command == "use_prefetch")             { use_prefetch = std::stoi(value) != 0; }
-
-        else if (command == "nn_model_input_file")      { nn_model_input_file = value; }
-        else if (command == "orig_kernel_time_file")    { orig_kernel_time_file = value; }
-        else if (command == "workspace_size_file")      { workspace_size_file = value; }
-        else if (command == "input_pf_kernel_time_file"){ input_pf_kernel_time_file = value; }
-        else if (command == "pf_kernel_time_file")      { pf_kernel_time_file = value; }
-
         else if (command == "tensor_info_file")         { tensor_info_file = value; }
         else if (command == "kernel_info_file")         { kernel_info_file = value; }
         else if (command == "kernel_aux_time_file")     { kernel_aux_time_file = value; }
-
         else if (command == "stat_output_file")         { stat_output_file = value; }
         else if (command == "migration_policy")         { migration_policy_str = value; }
         else if (command == "eviction_policy")          { eviction_policy_str = value; }
@@ -621,14 +433,12 @@ int main(int argc, char *argv[]) {
         else if (command == "GPU_memory_size_GB")       { GPU_memory_size_GB = std::stod(value); }
         else if (command == "GPU_frequency_GHz")        { GPU_frequency_GHz = std::stod(value); }
         else if (command == "GPU_malloc_uspB")          { GPU_malloc_uspB = std::stod(value); }
-        else if (command == "GPU_free_uspB")            { GPU_free_uspB = std::stod(value); }
         // simulation SSD statistics
         else if (command == "SSD_PCIe_bandwidth_GBps")  { SSD_PCIe_bandwidth_GBps = std::stod(value); }
         else if (command == "SSD_read_latency_us")      { SSD_read_latency_us = std::stod(value); }
         else if (command == "SSD_write_latency_us")     { SSD_write_latency_us = std::stod(value); }
         else if (command == "SSD_latency_us")           { SSD_latency_us = std::stod(value); }
         // simulation PCIe statistics
-        else if (command == "PCIe_latency_us")          { PCIe_latency_us = std::stod(value); }
         else if (command == "PCIe_batch_size_page")     { PCIe_batch_size_in_page = std::stoi(value); }
         // simulation Timing sentivity statistics
         else if (command == "kernel_time_std_dev")      { kernel_time_std_dev = std::stod(value); }
@@ -641,42 +451,21 @@ int main(int argc, char *argv[]) {
           Assert(false);
         }
     }
+}
+
+int main(int argc, char *argv[]) {
+    // config file should be the first argument
+    if (argc == 1) {
+        eprintf("Please specify a config file\n", "");
+        Assert(false);
+    }
+    // exit if config file does not exist
+    std::string config_file_path = string(argv[1]);
+
+    parse_config_args(config_file_path);
     // sanity check
     Assert((int) Simulator::GPUPageTable::EvcPolicy::DEEPUM != (int) Simulator::MigPolicy::DEEPUM);
 
-    bool transform_input;
-    if (nn_model_input_file.size() != 0) {
-        Assert(orig_kernel_time_file.size() != 0);
-        Assert(workspace_size_file.size() != 0);
-        Assert(input_pf_kernel_time_file.size() != 0);
-        Assert(pf_kernel_time_file.size() != 0);
-        transform_input = true;
-    } else {
-        Assert(tensor_info_file.size() != 0);
-        Assert(kernel_info_file.size() != 0);
-        Assert(kernel_aux_time_file.size() != 0);
-        transform_input = false;
-    }
-
-    if (transform_input) {
-        // indirection if there is no file is fed through stdin
-        if (isatty(fileno(stdin))) {
-        if (nn_model_input_file.empty()) {
-            eprintf("No input NN model in either stdin or config file\n", "");
-        } else {
-            // open a file and redirect to stdin
-            std::ifstream nn_model(nn_model_input_file.c_str());
-            if (!nn_model.good()) {
-                eprintf("Invalid input NN model specified in config file <%s>\n",
-                        nn_model_input_file.c_str());
-                Assert(false);
-            }
-            if (is_transformer!=1) {
-                freopen(nn_model_input_file.c_str(), "r", stdin);
-            }
-        }
-        }
-    }
     // parameter transformation
     if (output_folder_name.back() == '/') output_folder_name.pop_back();
     stat_output_file = output_folder_name + "/" + stat_output_file;
@@ -732,68 +521,9 @@ int main(int argc, char *argv[]) {
 
     SetupOutputFolder();
 
-    if (transform_input) {
-        if (is_transformer == 1) {
-            transformer_parse(nn_model_input_file.c_str());
-            transformer_op_datalow_pass(borden);
-        } else {
-            InitScanner();
-            InitParser();
-            yyparse();
-            layer_pre_pass_datasize();
-            layer_first_pass_dataflow();
-        }
-
-        if (!is_simulation) {
-            // tensor info
-            r = new RedirStdOut("tensors.config");
-            for (size_t i = 0; i < tensor_list.size(); i++) {
-                tensor_list[i]->print();
-            }
-            delete r;
-        }
-
-        if (is_transformer == 1) {
-            // layer info
-            r = new RedirStdOut("layers.config");
-            for (size_t i = 0; i < forward_ops.size(); i++) {
-                forward_ops[i]->print();
-            }
-            delete r;
-            transformer_scheduling_kernels();
-        } else {
-            // layer info
-            r = new RedirStdOut("layers.config");
-            for (size_t i = 0; i < forward_layers.size(); i++) {
-                forward_layers[i]->print();
-            }
-            delete r;
-
-            layer_second_pass_scheduling_kernels();
-        }
-    } else {
-        loadKernelInfo();
-    }
+    loadKernelInfo();
 
     if (is_simulation) {
-        if (transform_input) {
-            loadKernelTimes();
-            loadWorkspaceSizes();
-            std::string token;
-
-            std::istringstream ss1(config_file_path);
-            std::vector<std::string> vec1;
-            while(std::getline(ss1, token, '/')) vec1.push_back(token);
-
-            std::istringstream ss2(vec1[vec1.size() - 1]);
-            std::vector<std::string> vec2;
-            while(std::getline(ss2, token, '-')) vec2.push_back(token);
-
-            string dnn_name = vec1[vec1.size() - 2];
-            int batch_size = std::stoi(vec2[0]);
-            exportKernelInfo(dnn_name, batch_size);
-        }
-
         // tensor info
         r = new RedirStdOut("tensors.config");
         for (size_t i = 0; i < tensor_list.size(); i++) {
@@ -840,10 +570,6 @@ int main(int argc, char *argv[]) {
             Assert(false);
         }
 
-        if (transform_input) {
-            exit(0);
-        }
-
         tensor_first_pass_liveness_analysis();
         tensor_second_pass_interval_formation();
         get_interval_time();
@@ -856,34 +582,28 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
+        if (use_prefetch) {
+            give_eviction_guide();
 
-        give_eviction_guide();
+            // eviction guide
+            // r = new RedirStdOut("evc_guide.config");
+            // print_eviction_guide_table();
+            // delete r;
 
-        // eviction guide
-        // r = new RedirStdOut("evc_guide.config");
-        // print_eviction_guide_table();
-        // delete r;
+            r = new RedirStdOut("pre_dealloc.config");
+            scheduling_prefetch();
+            delete r;
 
-        r = new RedirStdOut("pre_dealloc.config");
-        scheduling_prefetch();
-        delete r;
+            // prefetch guide
+            r = new RedirStdOut("prefetch_guide.config");
+            print_prefetch_table();
+            delete r;
 
-        // prefetch guide
-        r = new RedirStdOut("prefetch_guide.config");
-        print_prefetch_table();
-        delete r;
-
-        // real memory usage
-        r = new RedirStdOut("real_mem.config");
-        print_GPU_mem_really_in_use();
-        delete r;
-
-        // kernel time table
-        r = new RedirStdOut("kernel_time_table.config");
-        for (int i = 0; i < kernel_list.size(); i++) {
-            std::cout << kernel_time_table[i] << std::endl;
+            // real memory usage
+            r = new RedirStdOut("real_mem.config");
+            print_GPU_mem_really_in_use();
+            delete r;
         }
-        delete r;
 
         nprintf("Average interval time: %f ms\n", interval_list[(interval_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");

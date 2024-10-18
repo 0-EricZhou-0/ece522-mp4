@@ -43,13 +43,11 @@ double GPU_frequency_GHz = -1;
 double GPU_memory_size_GB = -1;
 double GPU_PCIe_bandwidth_GBps = -1;
 double GPU_malloc_uspB = -1;
-double GPU_free_uspB = -1;
 // SSD statistics
 double SSD_PCIe_bandwidth_GBps = -1;
 double SSD_read_latency_us = -1;
 double SSD_write_latency_us = -1;
 // PCIe statistics
-double PCIe_latency_us = -1;
 int PCIe_batch_size_in_page = -1;
 // Other parameters
 bool use_prefetch = false;
@@ -552,13 +550,13 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
 System::System() :
     GPU_frequency_Hz(GPU_frequency_GHz * pow(10, 9)),
     GPU_total_memory_pages(round(GPU_memory_size_GB / PAGE_SIZE * pow(1024, 3))),
-    PCIe_latency_cycles(PCIe_latency_us / pow(10, 6) / (1.0 / GPU_frequency_Hz)),
+    PCIe_latency_cycles(0), // parameter not used
     CPU_PCIe_bandwidth_Bpc(CPU_PCIe_bandwidth_GBps * pow(10, 9) / GPU_frequency_Hz),
     GPU_PCIe_bandwidth_Bpc(GPU_PCIe_bandwidth_GBps * pow(10, 9) / GPU_frequency_Hz),
     SSD_PCIe_bandwidth_Bpc(SSD_PCIe_bandwidth_GBps * pow(10, 9) / GPU_frequency_Hz),
     PCIe_batch_ii_cycle((PCIe_batch_size_in_page * PAGE_SIZE) / GPU_PCIe_bandwidth_Bpc),
     GPU_malloc_cycle_per_page(round(GPU_malloc_uspB * PAGE_SIZE / pow(10, 6) * GPU_frequency_Hz)),
-    GPU_free_cycle_per_page(round(GPU_free_uspB * PAGE_SIZE / pow(10, 6) * GPU_frequency_Hz)),
+    GPU_free_cycle_per_page(0), // parameter not used
     SSD_read_latency_cycle(SSD_read_latency_us / pow(10, 6) * GPU_frequency_Hz),
     SSD_write_latency_cycle(SSD_write_latency_us / pow(10, 6) * GPU_frequency_Hz),
     should_prefetch(use_prefetch),

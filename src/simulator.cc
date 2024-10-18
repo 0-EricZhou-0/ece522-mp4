@@ -33,7 +33,7 @@ extern vector<DataMovementHint> movement_hints;
 extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;
 
-extern int is_UVM;
+bool is_ideal;
 
 namespace Simulator {
 
@@ -68,9 +68,9 @@ EventSimulator::EventSimulator(string basename) {
       // create and get entry
       CPUPageTable::CPUPageTableEntry *entry =
           sim_sys->CPU_PT.createEntry(page_starting_addr);
-      // Assert(entry);
+      Assert(entry);
       entry->ppn = 0;
-      if (is_UVM) {
+      if (!is_ideal) {
         if (tensor->is_global_weight) {
           entry->location = IN_SSD; // UVM enabled, tensor started in SSD
         } else {
