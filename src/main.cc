@@ -4,6 +4,7 @@
  * You should not need to modify this file.
  */
 
+
 #include <chrono>
 #include <string>
 #include <math.h>
@@ -15,12 +16,8 @@
 #include <ctype.h>
 #include <iostream>
 #include <unistd.h>
-#include "utility.h"
-#include "errors.h"
-#include "parser.h"
-#include "y.tab.h"
+#include <algorithm>
 #include "analysis.h"
-#include "codegen.h"
 #include "simulationComponents.h"
 #include "simulator.h"
 #include "printUtils.h"
@@ -29,17 +26,6 @@
 
 using std::chrono::duration;
 using std::chrono::high_resolution_clock;
-
-// Codegen param
-extern int is_resnet;
-extern int is_inception;
-extern int is_senet;
-extern int batch_size;
-extern int input_H;
-extern int input_W;
-extern int num_threads;
-extern bool is_individual;
-extern bool is_input_pf_only;
 
 // CPU sim param
 extern double CPU_PCIe_bandwidth_GBps;
@@ -85,8 +71,8 @@ extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;
 
 // 
-extern std::vector<Model_Layer*> forward_layers;
-extern std::vector<Model_OP*> forward_ops;
+// extern std::vector<Model_Layer*> forward_layers;
+// extern std::vector<Model_OP*> forward_ops;
 extern std::vector<CUDAKernel> kernel_list;
 extern std::vector<Tensor*> tensor_list;
 extern std::vector<Hidding_Interval*> interval_list;
@@ -138,41 +124,41 @@ class RedirStdOut {
         std::streambuf *cout_buf;
 };
 
-/* Function: PrintOneToken()
- * Usage: PrintOneToken(T_Double, "3.5", val, loc);
- * -----------------------------------------------
- */
-static void PrintOneToken(yytokentype token, const char *text, YYSTYPE value,
-                          yyltype loc)
-{
-  char buffer[] = {'\'', (char) token, '\'', '\0'};
-  const char *name = token >= T_Sequential ? gTokenNames[token - T_Sequential] : buffer;
+// /* Function: PrintOneToken()
+//  * Usage: PrintOneToken(T_Double, "3.5", val, loc);
+//  * -----------------------------------------------
+//  */
+// static void PrintOneToken(yytokentype token, const char *text, YYSTYPE value,
+//                           yyltype loc)
+// {
+//   char buffer[] = {'\'', (char) token, '\'', '\0'};
+//   const char *name = token >= T_Sequential ? gTokenNames[token - T_Sequential] : buffer;
 
-  printf("%-12s line %d cols %d-%d is %s ", text,
-	   loc.first_line, loc.first_column, loc.last_column, name);
+//   printf("%-12s line %d cols %d-%d is %s ", text,
+// 	   loc.first_line, loc.first_column, loc.last_column, name);
 
-  switch(token) {
-    case T_IntConstant:
-      printf("(value = %d)\n", value.integerConstant); break;
-    case T_DoubleConstant:
-      printf("(value = %g)\n", value.doubleConstant); break;
-    case T_BoolConstant:
-      printf("(value = %s)\n", value.boolConstant ? "true" : "false"); break;
-    case T_Identifier:
-	if (strcmp(text, value.identifier)) {
-	  printf("(truncated to %s)\n", value.identifier);
-	  break;
-	}
-    default:
-      printf("\n"); break;
-  }
-}
+//   switch(token) {
+//     case T_IntConstant:
+//       printf("(value = %d)\n", value.integerConstant); break;
+//     case T_DoubleConstant:
+//       printf("(value = %g)\n", value.doubleConstant); break;
+//     case T_BoolConstant:
+//       printf("(value = %s)\n", value.boolConstant ? "true" : "false"); break;
+//     case T_Identifier:
+// 	if (strcmp(text, value.identifier)) {
+// 	  printf("(truncated to %s)\n", value.identifier);
+// 	  break;
+// 	}
+//     default:
+//       printf("\n"); break;
+//   }
+// }
 
 void CheckVar(double var, std::string variable_name, bool gt=true) {
     if ((gt && var < 0) || (!gt && var > 0)) {
         eprintf("Invalid or missing <%s>, current value: %f, should be %s than 0, aborting\n",
                 variable_name.c_str(), var, gt ? "greater" : "less");
-        Assert(false);
+        assert(false);
     }
 }
 
@@ -188,9 +174,9 @@ void SimulationParamSanityCheck() {
     CheckVar(CPU_memory_line_GB, "CPU_memory_line_GB");
 
     if (migration_policy == Simulator::MigPolicy::DEEPUM)
-        Assert(eviction_policy == Simulator::GPUPageTable::EvcPolicy::DEEPUM);
+        assert(eviction_policy == Simulator::GPUPageTable::EvcPolicy::DEEPUM);
     if (eviction_policy == Simulator::GPUPageTable::EvcPolicy::DEEPUM)
-        Assert(migration_policy == Simulator::MigPolicy::DEEPUM);
+        assert(migration_policy == Simulator::MigPolicy::DEEPUM);
     if (migration_policy == Simulator::MigPolicy::DEEPUM)
         CheckVar(prefetch_degree, "prefetch_degree");
     else
@@ -205,64 +191,46 @@ void SimulationParamSanityCheck() {
     if (SSD_PCIe_bandwidth_GBps > GPU_PCIe_bandwidth_GBps) {
         eprintf("Invalid SSD Bandwidth [%f] > GPU Bandwidth [%f]\n",
                 SSD_PCIe_bandwidth_GBps, GPU_PCIe_bandwidth_GBps);
-        Assert(false);
+        assert(false);
     }
     if (CPU_PCIe_bandwidth_GBps > GPU_PCIe_bandwidth_GBps) {
         eprintf("Invalid CPU Bandwidth [%f] > GPU Bandwidth [%f]\n",
                 SSD_PCIe_bandwidth_GBps, GPU_PCIe_bandwidth_GBps);
-        Assert(false);
+        assert(false);
     }
     if (SSD_PCIe_bandwidth_GBps > CPU_PCIe_bandwidth_GBps) {
         eprintf("Unsupported SSD Bandwidth [%f] > CPU Bandwidth [%f]\n",
                 SSD_PCIe_bandwidth_GBps, CPU_PCIe_bandwidth_GBps);
-        Assert(false);
+        assert(false);
     }
     if (GPU_PCIe_bandwidth_GBps > SSD_PCIe_bandwidth_GBps + CPU_PCIe_bandwidth_GBps) {
         eprintf("Unsupported GPU Bandwidth [%f] > SSD Bandwidth [%f] + CPU Bandwidth [%f]\n",
                 GPU_PCIe_bandwidth_GBps, SSD_PCIe_bandwidth_GBps, CPU_PCIe_bandwidth_GBps);
-        Assert(false);
+        assert(false);
     }
     if (kernel_speedup <= 0) {
         eprintf("Invalid kernel speedup [%f]\n", kernel_speedup);
-        Assert(false);
+        assert(false);
     }
 }
 
 void SetupOutputFolder() {
     if (output_override)
         wprintf("Overriding output folder <%s>...\n", output_folder_name.c_str());
-    Assert(system(("mkdir -p " + output_folder_name).c_str()) == 0);
-    Assert(system(("find " + output_folder_name + "/statistics -name \"*.config\" -type f | xargs rm -f").c_str()) == 0);
+    assert(system(("mkdir -p " + output_folder_name).c_str()) == 0);
+    assert(system(("find " + output_folder_name + "/statistics -name \"*.config\" -type f | xargs rm -f").c_str()) == 0);
     // clean up dirs
     if (output_override && !is_simulation) {
-        Assert(system(("rm -rf " + output_folder_name + "/include").c_str()) == 0);
-        Assert(system(("rm -rf " + output_folder_name + "/src").c_str()) == 0);
-        Assert(system(("rm -rf " + output_folder_name + "/bin").c_str()) == 0);
-        Assert(system(("rm -rf " + output_folder_name + "/scripts").c_str()) == 0);
-        Assert(system(("rm -rf " + output_folder_name + "/profiling_src").c_str()) == 0);
-        Assert(system(("rm -f " + output_folder_name + "/main.cu").c_str()) == 0);
-        Assert(system(("rm -f " + output_folder_name + "/main").c_str()) == 0);
+        assert(system(("rm -rf " + output_folder_name + "/include").c_str()) == 0);
+        assert(system(("rm -rf " + output_folder_name + "/src").c_str()) == 0);
+        assert(system(("rm -rf " + output_folder_name + "/bin").c_str()) == 0);
+        assert(system(("rm -rf " + output_folder_name + "/scripts").c_str()) == 0);
+        assert(system(("rm -rf " + output_folder_name + "/profiling_src").c_str()) == 0);
+        assert(system(("rm -f " + output_folder_name + "/main.cu").c_str()) == 0);
+        assert(system(("rm -f " + output_folder_name + "/main").c_str()) == 0);
     }
     // make dirs
-    Assert(system(("mkdir -p " + output_folder_name + "/statistics").c_str()) == 0);
-    // LRU visualization ////////////////////////////////////////////////////////////
-    // Assert(system(("mkdir -p " + output_folder_name + "/lru_trace").c_str()) == 0);
-    /////////////////////////////////////////////////////////////////////////////////
-    if (!is_simulation) {
-        Assert(system(("mkdir -p " + output_folder_name + "/include").c_str()) == 0);
-        Assert(system(("mkdir -p " + output_folder_name + "/src").c_str()) == 0);
-        Assert(system(("mkdir -p " + output_folder_name + "/bin").c_str()) == 0);
-        Assert(system(("mkdir -p " + output_folder_name + "/scripts").c_str()) == 0);
-        Assert(system(("mkdir -p " + output_folder_name + "/profiling_src").c_str()) == 0);
-        Assert(system(("cp ./resources/cudadnnUtil.cuh " + output_folder_name + "/include/cudadnnUtil.cuh").c_str()) == 0);
-        Assert(system(("cp ./resources/cudadnnUtil.cu " + output_folder_name + "/src/cudadnnUtil.cu").c_str()) == 0);
-        Assert(system(("cp ./resources/Makefile " + output_folder_name + "/Makefile").c_str()) == 0);
-        if (is_individual) {
-            Assert(system(("cp ./resources/compileAndRunI.sh " + output_folder_name + "/scripts/compileAndRun.sh").c_str()) == 0);
-        } else {
-            Assert(system(("cp ./resources/compileAndRunW.sh " + output_folder_name + "/scripts/compileAndRun.sh").c_str()) == 0);
-        }
-    }
+    assert(system(("mkdir -p " + output_folder_name + "/statistics").c_str()) == 0);
 }
 
 void loadKernelInfo() {
@@ -272,7 +240,7 @@ void loadKernelInfo() {
     {
         // load tensor info
         std::ifstream tensor_info_fin(tensor_info_file);
-        Assert(tensor_info_fin.good());
+        assert(tensor_info_fin.good());
         iprintf("Loading tensor info from file <%s>\n", tensor_info_file.c_str());
 
         string tensor_id, tensor_size, tensor_global;
@@ -291,7 +259,7 @@ void loadKernelInfo() {
     } {
         // load kernel info
         std::ifstream kinfo_fin(kernel_info_file);
-        Assert(kinfo_fin.good());
+        assert(kinfo_fin.good());
         iprintf("Loading kernel info from file <%s>\n", kernel_info_file.c_str());
 
         string kernel_idx, ktype, exe_time, input_tensor_list, output_tensor_list, workspace;
@@ -307,12 +275,12 @@ void loadKernelInfo() {
             Tensor* workspace_tensor = nullptr;
 
             auto list_to_vec_tensor = [](std::vector<Tensor*> &vec_tensor, const std::string &str_list) {
-                Assert(str_list.front() == '[' && str_list.back() == ']');
+                assert(str_list.front() == '[' && str_list.back() == ']');
                 std::string tensor_id;
                 std::istringstream ss(str_list.substr(1, str_list.size() - 2));
                 while(std::getline(ss, tensor_id, ',')) {
                     int tensor_id_i = std::stoi(tensor_id);
-                    Assert(tensor_id_i < tensor_list.size());
+                    assert(tensor_id_i < tensor_list.size());
                     vec_tensor.push_back(tensor_list[tensor_id_i]);
                 }
             };
@@ -323,7 +291,7 @@ void loadKernelInfo() {
             // workspace tensor
             if (workspace.size()) {
                 int workspace_tensor_idx = std::stoi(workspace);
-                Assert(workspace_tensor_idx < tensor_list.size());
+                assert(workspace_tensor_idx < tensor_list.size());
                 workspace_tensor = tensor_list[std::stoi(workspace)];
                 outputs.push_back(workspace_tensor);
             } else {
@@ -339,7 +307,7 @@ void loadKernelInfo() {
     } {
         // load kernel aux info
         std::ifstream auxtime_fin(kernel_aux_time_file);
-        Assert(auxtime_fin.good());
+        assert(auxtime_fin.good());
         iprintf("Loading aux kernel info from file <%s>\n", kernel_aux_time_file.c_str());
 
         string kernel_idx, input_pf_exe_time, pf_exe_time;
@@ -357,12 +325,12 @@ void loadKernelInfo() {
     } {
         // validation
         for (unsigned tensor_idx = 0; tensor_idx < kernel_list.size(); tensor_idx++) {
-            Assert(tensor_list[tensor_idx]->tensor_id == tensor_idx);
+            assert(tensor_list[tensor_idx]->tensor_id == tensor_idx);
         }
         for (unsigned kernel_idx = 0; kernel_idx < kernel_list.size(); kernel_idx++) {
-            Assert(kernel_list[kernel_idx].kernel_id == kernel_idx);
-            Assert(kernel_list[kernel_idx].input_pf_execution_cycles >= kernel_list[kernel_idx].execution_cycles);
-            Assert(kernel_list[kernel_idx].pf_execution_cycles >= kernel_list[kernel_idx].input_pf_execution_cycles);
+            assert(kernel_list[kernel_idx].kernel_id == kernel_idx);
+            assert(kernel_list[kernel_idx].input_pf_execution_cycles >= kernel_list[kernel_idx].execution_cycles);
+            assert(kernel_list[kernel_idx].pf_execution_cycles >= kernel_list[kernel_idx].input_pf_execution_cycles);
         }
     }
     iprintf("Total %d tensors found\n", tensor_list.size());
@@ -374,7 +342,7 @@ void parse_config_args(std::string config_file_path) {
     std::ifstream config_file(config_file_path);
     if (!config_file.good()) {
         eprintf("Config file <%s> does not exist\n", config_file_path.c_str());
-        Assert(false);
+        assert(false);
     }
     // parse config file
     std::string line;
@@ -395,26 +363,13 @@ void parse_config_args(std::string config_file_path) {
         else if (command == "is_simulation")            { is_simulation = std::stoi(value) != 0; }
         else if (command == "is_profiling")             { is_simulation = std::stoi(value) == 0; }
         // profiling general settings
-        else if (command == "is_individual")            { is_individual = std::stoi(value) != 0; }
         else if (command == "is_compile")               { is_compile = std::stoi(value) != 0; }
         else if (command == "compile_max_thread_num")   { compile_max_thread_num = std::stoi(value); }
         else if (command == "is_run")                   { is_run = std::stoi(value) != 0; }
         else if (command == "is_cudnn")                 { is_cudnn = std::stoi(value) != 0; }
-        // codegen settings
-        else if (command == "is_resnet")                { is_resnet = std::stoul(value); }
-        else if (command == "is_inception")             { is_inception = std::stoul(value);}
-        else if (command == "is_senet")                 { is_senet = std::stoul(value);}
-        else if (command == "is_transformer")           { is_transformer = std::stoi(value); }
-        else if (command == "trans_borden")             { borden = std::stoi(value); }
-        else if (command == "batch_size")               { batch_size = std::stoi(value); }
-        else if (command == "input_H")                  { input_H = std::stoi(value); }
-        else if (command == "input_W")                  { input_W = std::stoi(value); }
-        else if (command == "num_iteration")            { num_iteration = std::stoi(value); }
-        else if (command == "num_threads")              { num_threads = std::stoi(value); }
-        else if (command == "is_input_pf_only")         { is_input_pf_only = std::stoi(value) != 0; }
         // simulation general settings
         else if (command == "is_ideal")                 { is_ideal = std::stoi(value) != 0; }
-        else if (command == "use_prefetch")             { use_prefetch = std::stoi(value) != 0; }
+        else if (command == "use_prefetch")             { use_prefetch = std::stoi(value) != 0; printf("use_prefetch: %d\n", use_prefetch); }
         else if (command == "tensor_info_file")         { tensor_info_file = value; }
         else if (command == "kernel_info_file")         { kernel_info_file = value; }
         else if (command == "kernel_aux_time_file")     { kernel_aux_time_file = value; }
@@ -425,6 +380,7 @@ void parse_config_args(std::string config_file_path) {
         else if (command == "prefetch_degree")          { prefetch_degree = std::stoi(value); }
         else if (command == "delta_parameter")          { delta_parameter = std::stod(value); }
         else if (command == "system_latency_us")        { system_latency_us = std::stod(value); }
+        else if (command == "num_iteration")            { num_iteration = std::stoi(value); }
         // simulation CPU statistics
         else if (command == "CPU_PCIe_bandwidth_GBps")  { CPU_PCIe_bandwidth_GBps = std::stod(value); }
         else if (command == "CPU_memory_line_GB")       { CPU_memory_line_GB = std::stod(value); }
@@ -448,7 +404,7 @@ void parse_config_args(std::string config_file_path) {
         else if (command == "#" || command == "")       {}
         else {
           eprintf("Error: Invalid config entry <%s>, aborting...\n", command.c_str());
-          Assert(false);
+          assert(false);
         }
     }
 }
@@ -457,14 +413,15 @@ int main(int argc, char *argv[]) {
     // config file should be the first argument
     if (argc == 1) {
         eprintf("Please specify a config file\n", "");
-        Assert(false);
+        assert(false);
     }
     // exit if config file does not exist
     std::string config_file_path = string(argv[1]);
 
     parse_config_args(config_file_path);
+    use_prefetch = 1;
     // sanity check
-    Assert((int) Simulator::GPUPageTable::EvcPolicy::DEEPUM != (int) Simulator::MigPolicy::DEEPUM);
+    assert((int) Simulator::GPUPageTable::EvcPolicy::DEEPUM != (int) Simulator::MigPolicy::DEEPUM);
 
     // parameter transformation
     if (output_folder_name.back() == '/') output_folder_name.pop_back();
@@ -498,11 +455,7 @@ int main(int argc, char *argv[]) {
     // parameter validation
     if (is_simulation) {
         SimulationParamSanityCheck();
-    } else {
-        if (is_input_pf_only) Assert(is_UVM);
     }
-    // only one or less than one of these options are specified
-    Assert(is_resnet + is_inception + is_senet <= 1);
 
     printf("End configs\n\n");
 
@@ -517,7 +470,7 @@ int main(int argc, char *argv[]) {
     // cout redirection
     RedirStdOut* r;
 
-    ParseCommandLine(argc, argv);
+    // ParseCommandLine(argc, argv);
 
     SetupOutputFolder();
 
@@ -560,14 +513,14 @@ int main(int argc, char *argv[]) {
             }
         }
         double max_memory_usage_GB = max_num_pages * PAGE_SIZE / std::pow(1024, 3);
-        Assert(max_mem_usage_kernel != nullptr);
+        assert(max_mem_usage_kernel != nullptr);
         nprintf("Memory Usage Maximized at Kernel%d: %lld B (%f GB)\n",
                 max_mem_usage_kernel->kernel_id, max_num_pages * PAGE_SIZE,
                 max_memory_usage_GB);
         if (max_memory_usage_GB > GPU_memory_size_GB) {
             eprintf("Single kernel memory usage %f GB greater than total GPU memory size %f GB, aborting",
                     max_memory_usage_GB, GPU_memory_size_GB);
-            Assert(false);
+            assert(false);
         }
 
         tensor_first_pass_liveness_analysis();
@@ -582,28 +535,30 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
-        if (use_prefetch) {
-            give_eviction_guide();
+        // printf("use_prefetch: %d\n", use_prefetch);
+        // if (use_prefetch) {
+        // printf("use_prefetch2: %d\n", use_prefetch);
+        //     give_eviction_guide();
 
-            // eviction guide
-            // r = new RedirStdOut("evc_guide.config");
-            // print_eviction_guide_table();
-            // delete r;
+        //     // eviction guide
+        //     // r = new RedirStdOut("evc_guide.config");
+        //     // print_eviction_guide_table();
+        //     // delete r;
 
-            r = new RedirStdOut("pre_dealloc.config");
-            scheduling_prefetch();
-            delete r;
+        //     r = new RedirStdOut("pre_dealloc.config");
+        //     scheduling_prefetch();
+        //     delete r;
 
-            // prefetch guide
-            r = new RedirStdOut("prefetch_guide.config");
-            print_prefetch_table();
-            delete r;
+        //     // prefetch guide
+        //     r = new RedirStdOut("prefetch_guide.config");
+        //     print_prefetch_table();
+        //     delete r;
 
-            // real memory usage
-            r = new RedirStdOut("real_mem.config");
-            print_GPU_mem_really_in_use();
-            delete r;
-        }
+        //     // real memory usage
+        //     r = new RedirStdOut("real_mem.config");
+        //     print_GPU_mem_really_in_use();
+        //     delete r;
+        // }
 
         nprintf("Average interval time: %f ms\n", interval_list[(interval_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");
@@ -624,9 +579,9 @@ int main(int argc, char *argv[]) {
                     kernel_list[i].execution_cycles *= ratio;
                     kernel_list[i].input_pf_execution_cycles *= ratio;
                     kernel_list[i].pf_execution_cycles *= ratio;
-                    Assert(kernel_list[i].execution_cycles > 0);
-                    Assert(kernel_list[i].input_pf_execution_cycles > 0);
-                    Assert(kernel_list[i].pf_execution_cycles > 0);
+                    assert(kernel_list[i].execution_cycles > 0);
+                    assert(kernel_list[i].input_pf_execution_cycles > 0);
+                    assert(kernel_list[i].pf_execution_cycles > 0);
                 }
             }
             iprintf("\nPerforming Simulation\n", "");
@@ -637,51 +592,17 @@ int main(int argc, char *argv[]) {
         iprintf("\nPerforming Analysis\n", "");
         stat.prepareOutputFiles(true);
         stat.analyzeStat();
-    } else {
-        if (is_cudnn) {
-            iprintf("Generating main code -- CUDNN mode\n", "");
-            auto start_time = high_resolution_clock::now();
-            // cudnn_profiling(true);          // normal run, individual
-            cudnn_profiling(false);         // normal run, grouped
-            // cudnn_profiling(false, true);   // workspace only
-            duration<float> fsec = high_resolution_clock::now() - start_time;
-            iprintf("Profiling duration: %fs (%fms)\n", fsec.count(), fsec.count() * 1000);
-        } else {
-            wprintf("Profiling without CUDNN deprecated\n", "");
-            iprintf("Generating main code -- %s mode\n", is_individual ? "individual" : "whole");
-            main_code_generation();
-            printf("\n");
-
-            if (is_compile || is_run) {
-                printf("Profiling with Individual: %s, Compile: %s, Run: %s\n",
-                    is_individual ? "True" : "False",
-                    is_compile ? "True" : "False",
-                    is_run ? "True" : "False");
-                // run profiling scripts
-                std::string args = " ";
-                if (is_compile)
-                    args += "-c ";
-                if (is_compile && compile_max_thread_num > 0)
-                    args += "-t " + to_string(compile_max_thread_num) + " ";
-                if (is_run)
-                    args += "-r ";
-                Assert(system((output_folder_name + "/scripts/compileAndRun.sh" + args).c_str()) == 0);
-            } else {
-                iprintf("Both Compile and Run are disabled, run <%s> manually to profile\n",
-                    (output_folder_name + "/scripts/compileAndRun.sh").c_str());
-            }
-        }
     }
 
-    for (int i = 0; i < forward_layers.size(); i++)
-    {
-      delete forward_layers[i];
-    }
-    for (int i = 0; i < tensor_list.size(); i++)
-    {
-      delete tensor_list[i];
-    }
+    // for (int i = 0; i < forward_layers.size(); i++)
+    // {
+    //   delete forward_layers[i];
+    // }
+    // for (int i = 0; i < tensor_list.size(); i++)
+    // {
+    //   delete tensor_list[i];
+    // }
 
 
-    return (ReportError::NumErrors() == 0? 0 : -1);
+    // return (ReportError::NumErrors() == 0? 0 : -1);
 }

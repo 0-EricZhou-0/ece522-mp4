@@ -27,7 +27,7 @@ using Simulator::PageLocation;
 
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
-extern vector<Model_Layer*> forward_layers;
+// extern vector<Model_Layer*> forward_layers;
 extern vector<DataMovementHint> movement_hints;
 
 extern long long memory_offset_intermediate;
@@ -45,12 +45,12 @@ EventSimulator::EventSimulator(string basename) {
   sim_stat = new Simulator::Stat(basename);
   sim_stat->prepareOutputFiles();
 
-  // Assert(memory_offset_intermediate < (long long) LONG_MAX);
-  // Assert(memory_offset_weights < (long long) LONG_MAX);
-  // Assert(memory_offset_intermediate + memory_offset_weights < (long long) LONG_MAX);
+  // assert(memory_offset_intermediate < (long long) LONG_MAX);
+  // assert(memory_offset_weights < (long long) LONG_MAX);
+  // assert(memory_offset_intermediate + memory_offset_weights < (long long) LONG_MAX);
 
-  // Assert(isPageAligned(memory_offset_intermediate));
-  // Assert(isPageAligned(memory_offset_weights));
+  // assert(isPageAligned(memory_offset_intermediate));
+  // assert(isPageAligned(memory_offset_weights));
 
   long ideal_exe_time = 0;
   for (CUDAKernel kernel : kernel_list)
@@ -68,7 +68,7 @@ EventSimulator::EventSimulator(string basename) {
       // create and get entry
       CPUPageTable::CPUPageTableEntry *entry =
           sim_sys->CPU_PT.createEntry(page_starting_addr);
-      Assert(entry);
+      assert(entry);
       entry->ppn = 0;
       if (!is_ideal) {
         if (tensor->is_global_weight) {
@@ -110,7 +110,7 @@ void EventSimulator::step() {
   //   printf("Time advanced from <%15ld> to <%15ld> ===================\n",
   //       current_time, scheduled_event->scheduled_time);
   // }
-  // Assert(current_time <= scheduled_event->scheduled_time);
+  // assert(current_time <= scheduled_event->scheduled_time);
   current_time = scheduled_event->scheduled_time;
   // check if event is should be executed
   if (scheduled_event->shouldExecute()) {
@@ -226,11 +226,11 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //       DataMovementHint &hint = movement_hints[current_hint_ID];
 //       if (hint.from == NOT_PRESENT) {
 //         // allocate
-//         // Assert(hint.to != NOT_PRESENT);
+//         // assert(hint.to != NOT_PRESENT);
 
 //       } else if (hint.from == IN_GPU) {
 //         // evict
-//         // Assert(hint.to != IN_GPU);
+//         // assert(hint.to != IN_GPU);
 
 //       } else {
 //         // prefetch
@@ -276,7 +276,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //         current_cycle += wait_cycles;
 //         iprintf("  GPU stop page fault handling @ %ld\n", current_cycle);
 
-//         // Assert(page_fault_end_cycle > current_cycle);
+//         // assert(page_fault_end_cycle > current_cycle);
 //         current_cycle = page_fault_end_cycle;
 //         iprintf("  Magic box end page fault handling @ %ld\n", current_cycle);
 //         reportTensorStatus(required_tensors);
@@ -287,8 +287,8 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     // sanity check, if all the required data have arrived in the GPU memory
 //     reportTensorStatus(required_tensors);
 //     reportAllQueueStatus();
-//     // Assert(requiredPageArrived(required_tensors));
-//     // Assert(GPUGetWaitingCriticalStepCycles() == 0);
+//     // assert(requiredPageArrived(required_tensors));
+//     // assert(GPUGetWaitingCriticalStepCycles() == 0);
 
 //     // runs as normal
 //     unsigned long delta_cycles = kernel.execution_cycles;
@@ -310,7 +310,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // void Simulation::alloc_CPU_PTE(Addr vpn) {
-//   // Assert(CPU_page_table.find(vpn) != CPU_page_table.end());
+//   // assert(CPU_page_table.find(vpn) != CPU_page_table.end());
 //   if (CPU_phys_page_avail.size() == 0) {
 //     CPU_phys_page_avail.insert(CPU_total_memory_pages * PAGE_SIZE);
 //     CPU_total_memory_pages++;
@@ -324,15 +324,15 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // void Simulation::mark_invalid_CPU_PTE(Addr vpn) {
-//   // Assert(CPU_page_table.find(vpn) != CPU_page_table.end());
+//   // assert(CPU_page_table.find(vpn) != CPU_page_table.end());
 //   CPUPageTableEntry &entry = CPU_page_table[vpn];
 //   entry.in_transfer = IN_MIGRATION;
 // }
 
 // void Simulation::erase_CPU_PTE(Addr vpn) {
-//   // Assert(CPU_page_table.find(vpn) != CPU_page_table.end());
+//   // assert(CPU_page_table.find(vpn) != CPU_page_table.end());
 //   CPUPageTableEntry &entry = CPU_page_table[vpn];
-//   // Assert(CPU_phys_page_avail.find(vpn) == CPU_phys_page_avail.end());
+//   // assert(CPU_phys_page_avail.find(vpn) == CPU_phys_page_avail.end());
 //   CPU_phys_page_avail.insert(entry.ppn);
 // }
 
@@ -343,7 +343,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     evict_GPU_PTE();
 //     return false;
 //   }
-//   // Assert(GPU_phys_page_avail.size() > 0);
+//   // assert(GPU_phys_page_avail.size() > 0);
 //   Addr ppn = *GPU_phys_page_avail.begin();
 //   GPU_phys_page_avail.erase(ppn);
 //   GPUPageTableEntry &entry = GPU_page_table[vpn];
@@ -357,7 +357,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     return;
 //   GPUPageTableEntry &entry = GPU_page_table[vpn];
 //   Addr ppn = entry.ppn;
-//   // Assert(entry.in_transfer == PRESENT);
+//   // assert(entry.in_transfer == PRESENT);
 //   GPU_phys_page_avail.insert(ppn);
 // }
 
@@ -392,18 +392,18 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //       break;
 //     }
 //     case LRU: {
-//       // Assert(false);
+//       // assert(false);
 //       break;
 //     }
 //     case GUIDED: {
-//       // Assert(false);
+//       // assert(false);
 //       break;
 //     }
 //     default:
-//       // Assert(false);
+//       // assert(false);
 //   }
-//   // Assert(GPU_page_table.find(evicted_entry.first) != GPU_page_table.end());
-//   // Assert(CPU_page_table.find(evicted_entry.first) != CPU_page_table.end());
+//   // assert(GPU_page_table.find(evicted_entry.first) != GPU_page_table.end());
+//   // assert(CPU_page_table.find(evicted_entry.first) != CPU_page_table.end());
 //   return evicted_entry.first;
 // }
 
@@ -450,7 +450,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     // sync with GPU page table
 //     if (GPU_page_table.find(completed_page) != GPU_page_table.end()) {
 //       // entry not erased yet
-//       // Assert(GPU_page_table[completed_page].in_transfer = IN_MIGRATION);
+//       // assert(GPU_page_table[completed_page].in_transfer = IN_MIGRATION);
 //       erase_GPU_PTE(completed_page);
 //     }
 //   }
@@ -467,7 +467,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     // sync with GPU page table
 //     if (GPU_page_table.find(completed_page) != GPU_page_table.end()) {
 //       // entry not erased yet
-//       // Assert(GPU_page_table[completed_page].in_transfer = IN_MIGRATION);
+//       // assert(GPU_page_table[completed_page].in_transfer = IN_MIGRATION);
 //       erase_GPU_PTE(completed_page);
 //     }
 //   }
@@ -589,7 +589,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //       }
 //       PCIe_GPU_in_last_taken = IN_SSD;
 //     } else {
-//       // Assert(false);
+//       // assert(false);
 //     }
 //   }
 // }
@@ -615,7 +615,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //       }
 //       PCIe_GPU_out_last_taken = IN_SSD;
 //     } else {
-//       // Assert(false);
+//       // assert(false);
 //     }
 //   }
 // }
@@ -683,12 +683,12 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // void Simulation::PCIeQueue::addToFront(Addr page_start) {
-//   // Assert(isPageAligned(page_start));
+//   // assert(isPageAligned(page_start));
 //   // already in transfer
 //   if (metadata.find(page_start) != metadata.end() && metadata[page_start] >= 0)
 //     return;
 //   // if found in wait queue, requeue at start of the queue
-//   // Assert(metadata.find(page_start) == metadata.end() || metadata[page_start] < 0);
+//   // assert(metadata.find(page_start) == metadata.end() || metadata[page_start] < 0);
 //   if (metadata.find(page_start) != metadata.end() && metadata[page_start] < 0) {
 //     waiting_queue.erase(std::remove(waiting_queue.begin(), waiting_queue.end(), page_start), waiting_queue.end());
 //     metadata.erase(page_start);
@@ -699,7 +699,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // void Simulation::PCIeQueue::addToBack(Addr page_start) {
-//   // Assert(isPageAligned(page_start));
+//   // assert(isPageAligned(page_start));
 //   // if found in wait queue, do nothing
 //   if (metadata.find(page_start) != metadata.end())
 //     return;
@@ -712,14 +712,14 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // Addr Simulation::PCIeQueue::transferFrontPage(unsigned long timestamp) {
-//   // Assert(waiting_queue.size() > 0);
+//   // assert(waiting_queue.size() > 0);
 //   Addr to_transfer = *waiting_queue.begin();
 //   if (metadata.find(to_transfer) != metadata.end() && metadata[to_transfer] != -1) {
 //     eprintf("@ %lu =>%08lX\n", timestamp, to_transfer);
 //     reportQueueStatus();
 //     print();
 //   }
-//   // Assert(metadata.find(to_transfer) != metadata.end() && metadata[to_transfer] == -1);
+//   // assert(metadata.find(to_transfer) != metadata.end() && metadata[to_transfer] == -1);
 //   metadata[to_transfer] = timestamp + latency_cycle;
 //   waiting_queue.erase(waiting_queue.cbegin());
 //   in_transfer_queue.push_back(to_transfer);
@@ -729,9 +729,9 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // bool Simulation::PCIeQueue::hasTransferCompletePage(unsigned long timestamp) {
 //   if (in_transfer_queue.size() == 0)
 //     return false;
-//   // Assert(metadata.find(waiting_queue.front()) != metadata.end());
+//   // assert(metadata.find(waiting_queue.front()) != metadata.end());
 //   long front_entry_timestamp = metadata[in_transfer_queue.front()];
-//   // Assert(front_entry_timestamp >= 0);
+//   // assert(front_entry_timestamp >= 0);
 //   return timestamp >= front_entry_timestamp;
 // }
 
@@ -746,22 +746,22 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // Addr Simulation::PCIeQueue::getFrontCompletePage(unsigned long timestamp) {
-//   // Assert(hasTransferCompletePage(timestamp));
+//   // assert(hasTransferCompletePage(timestamp));
 //   return in_transfer_queue.front();
 // }
 
 // unsigned long Simulation::PCIeQueue::getCriticalCompleteTime() {
-//   // Assert(!hasWaitingCriticalPage());
+//   // assert(!hasWaitingCriticalPage());
 //   unsigned long abs_cycle = 0;
 //   for (Addr page : critical_pages) {
-//     // Assert(metadata.find(page) != metadata.end() && metadata[page] != -1);
+//     // assert(metadata.find(page) != metadata.end() && metadata[page] != -1);
 //     abs_cycle = abs_cycle < metadata[page] ? metadata[page] : abs_cycle;
 //   }
 //   return abs_cycle;
 // }
 
 // void Simulation::PCIeQueue::removeFrontCompletePage(unsigned long timestamp) {
-//   // Assert(hasTransferCompletePage(timestamp));
+//   // assert(hasTransferCompletePage(timestamp));
 //   Addr completed_page = in_transfer_queue.front();
 //   if (critical_pages.find(completed_page) != critical_pages.end())
 //     critical_pages.erase(completed_page);
@@ -772,8 +772,8 @@ void EventSimulator::schedule(vector<Event *> &events) {
 
 // void Simulation::GPUMMU::addToQueue(Addr page_start, unsigned long size,
 //                                     MMUAction action, bool critical) {
-//   // Assert(isPageAligned(page_start));
-//   // Assert(isPageSized(size));
+//   // assert(isPageAligned(page_start));
+//   // assert(isPageSized(size));
 //   // create a new entry
 //   GPUMMUEntry new_entry;
 //   new_entry.page_start = page_start;
@@ -792,7 +792,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //   else if (action == FREE)
 //     free_request_num++;
 //   else
-//     // Assert(false);
+//     // assert(false);
 // }
 
 // bool Simulation::GPUMMU::needAction() {
@@ -800,7 +800,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 // }
 
 // Simulation::GPUMMU::GPUMMUEntry Simulation::GPUMMU::manageFrontRequest(unsigned long timestamp) {
-//   // Assert(waiting_queue.size() > 0);
+//   // assert(waiting_queue.size() > 0);
 //   GPUMMUEntry managing_entry = waiting_queue.front();
 //   if (managing_entry.action == ALLOC) {
 //     managing_entry.finishing_timestamp = timestamp +
@@ -809,7 +809,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //     managing_entry.finishing_timestamp = timestamp +
 //         free_lat_off + free_lat_slp * managing_entry.size;
 //   } else {
-//     // Assert(false);
+//     // assert(false);
 //   }
 //   managing_queue.push_back(managing_entry);
 //   waiting_queue.erase(waiting_queue.cbegin());
@@ -851,7 +851,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //   else if (entry.action == FREE)
 //     free_request_num++;
 //   else
-//     // Assert(false);
+//     // assert(false);
 //   managing_queue.pop_front();
 //   return true;
 // }
@@ -885,7 +885,7 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //         } else if (CPU_page_table[starting_addr + PAGE_SIZE * page_num].location == IN_GPU) {
 //           in_migration_out_pages++;
 //         } else {
-//           // Assert(false);
+//           // assert(false);
 //         }
 //       } else if (CPU_page_table[starting_addr + PAGE_SIZE * page_num].in_transfer == PRESENT) {
 //         if (CPU_page_table[starting_addr + PAGE_SIZE * page_num].location == IN_CPU) {
@@ -897,10 +897,10 @@ void EventSimulator::schedule(vector<Event *> &events) {
 //         } else if (CPU_page_table[starting_addr + PAGE_SIZE * page_num].location == IN_GPU) {
 //           total_in_place_pages++;
 //         } else {
-//           // Assert(false);
+//           // assert(false);
 //         }
 //       } else {
-//         // Assert(false);
+//         // assert(false);
 //       }
 //     }
 //     total_in_migration_pages = in_migration_from_cpu_pages + in_migration_from_ssd_pages +

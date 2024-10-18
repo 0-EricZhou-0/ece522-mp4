@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <set>
 #include <unordered_map>
+#include <assert.h>
 #include <map>
 #include <queue>
 
@@ -51,8 +52,8 @@ class CUDAKernel {
     public:
         int kernel_id;
         CUDAKernelType type;
-        Model_Layer* parent_layer = nullptr;
-        Model_OP* parent_op = nullptr;
+        // Model_Layer* parent_layer = nullptr;
+        // Model_OP* parent_op = nullptr;
         std::unordered_set<Tensor*> inputs;
         std::unordered_set<Tensor*> outputs;
         Tensor* workspace = nullptr;
@@ -65,8 +66,8 @@ class CUDAKernel {
         long pf_execution_cycles = -1;
         long input_pf_execution_cycles = -1;
 
-        CUDAKernel(CUDAKernelType t, Model_Layer* layer);
-        CUDAKernel(CUDAKernelType t, Model_OP* op_layer);
+        // CUDAKernel(CUDAKernelType t, Model_Layer* layer);
+        // CUDAKernel(CUDAKernelType t, Model_OP* op_layer);
         CUDAKernel(int kernel_id,
                    CUDAKernelType t,
                    std::vector<Tensor*> input_tensor_list,
@@ -201,18 +202,18 @@ class FlashNeuron_simulator{
         void check_fetch_allocation();
 };
 
-//Transformers:
-void transformer_op_datalow_pass(int borden);
+// //Transformers:
+// void transformer_op_datalow_pass(int borden);
 
 
 
-void layer_pre_pass_datasize();
+// void layer_pre_pass_datasize();
 
-void layer_first_pass_dataflow();
+// void layer_first_pass_dataflow();
 
-void layer_second_pass_scheduling_kernels();
+// void layer_second_pass_scheduling_kernels();
 
-void transformer_scheduling_kernels();
+// void transformer_scheduling_kernels();
 
 void tensor_first_pass_liveness_analysis();
 

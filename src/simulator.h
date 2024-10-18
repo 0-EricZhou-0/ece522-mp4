@@ -288,7 +288,7 @@ class EventSimulator {
 //             CPU_to_GPU_faulted_pages(0), SSD_to_GPU_faulted_pages(0),
 //             kernel(nullptr) {}
 //         PageFaultInfo &operator+=(const PageFaultInfo &rhs) {
-//           Assert(kernel == rhs.kernel);
+//           assert(kernel == rhs.kernel);
 //           not_presented_pages += rhs.not_presented_pages;
 //           CPU_to_GPU_faulted_pages += rhs.CPU_to_GPU_faulted_pages;
 //           SSD_to_GPU_faulted_pages += rhs.SSD_to_GPU_faulted_pages;

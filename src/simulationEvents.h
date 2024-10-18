@@ -57,7 +57,7 @@ struct EventPtr {
  */
 struct EventPtrComp {
   bool operator()(const EventPtr &lhs, const EventPtr &rhs) const {
-    Assert(lhs.ptr && rhs.ptr);
+    assert(lhs.ptr && rhs.ptr);
     return lhs.ptr->scheduled_time > rhs.ptr->scheduled_time;
   }
 };

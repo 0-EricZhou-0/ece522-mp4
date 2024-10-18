@@ -37,7 +37,7 @@ class DataMovementHint {
     DataMovementHint(PageLocation from, PageLocation to, 
                      int issued_time, Tensor* tensor) :
         from(from), to(to), issued_time(issued_time), tensor(tensor) {
-      Assert(to != NOT_KNOWN);
+      assert(to != NOT_KNOWN);
     }
     bool operator<(const DataMovementHint& rhs) const {
       return issued_time < rhs.issued_time;

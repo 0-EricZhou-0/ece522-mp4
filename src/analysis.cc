@@ -6,7 +6,7 @@
 #include <math.h>
 #include "analysis.h"
 #include "ast.h"
-#include "codegen.h"
+#include <assert.h>
 #include "simulationUtils.h"
 #include "simulator.h"
 
@@ -15,10 +15,10 @@ using Simulator::PageLocation;
 
 extern std::string migration_policy_str;
 extern std::string eviction_policy_str;
-extern std::vector<Model_Layer*> forward_layers;
-extern std::vector<Model_OP*> forward_ops;
-extern std::unordered_map<int, Model_OP*> op_map;
-extern std::unordered_map<int, OP_tensor> transformer_tensors;
+// extern std::vector<Model_Layer*> forward_layers;
+// extern std::vector<Model_OP*> forward_ops;
+// extern std::unordered_map<int, Model_OP*> op_map;
+// extern std::unordered_map<int, OP_tensor> transformer_tensors;
 extern double GPU_frequency_GHz;
 extern double GPU_memory_size_GB;
 extern double CPU_PCIe_bandwidth_GBps;
@@ -60,140 +60,6 @@ const std::unordered_map<std::string, CUDAKernelType> kernel_type_revmap = []() 
     return ret;
 }();
 
-// extern const std::string print_pagelocation_array[5];
-
-Model_Layer::Model_Layer(){
-    operatorr = NULL;
-}
-
-
-Model_Layer::Model_Layer(Operatorr* op, int id){
-    N = C = H = W = 0;
-    layer_id = id;
-    operatorr = op;
-}
-
-
-void Model_Layer::give_next_layer_size(int* N, int* C, int* H, int* W){
-    *N = this->N;
-    Assert(this->operatorr!=NULL);
-    if (this->operatorr->type==OperatorType::Conv2d_T)
-    {
-        Conv2d* op = dynamic_cast<Conv2d*>(this->operatorr);
-        Assert(this->C==op->in_channels);
-        *C = op->out_channels;
-        *H = ((this->H - op->kernel_size_r + 2 * op->padding_0)/op->stride_0) +1;
-        *W = ((this->W - op->kernel_size_s + 2 * op->padding_1)/op->stride_1) +1;
-    }
-    else if (this->operatorr->type==OperatorType::ReLU_T || this->operatorr->type==OperatorType::BatchNorm2d_T || this->operatorr->type==OperatorType::Dropout_T)
-    {
-        *C = this->C;
-        *H = this->H;
-        *W = this->W;
-    }
-    else if (this->operatorr->type==OperatorType::MaxPool2d_T)
-    {
-        MaxPool2d* op = dynamic_cast<MaxPool2d*>(this->operatorr);
-        *C = this->C;
-        *H = ((this->H - op->kernel_size + 2 * op->padding)/op->stride) +1;
-        *W = ((this->W - op->kernel_size + 2 * op->padding)/op->stride) +1;
-    }
-    else if (this->operatorr->type==OperatorType::AdaptiveAvgPool2d_T)
-    {
-        AdaptiveAvgPool2d* op = dynamic_cast<AdaptiveAvgPool2d*>(this->operatorr);
-        *C = this->C;
-        *H = op->outputsize_0;
-        *W = op->outputsize_1;
-    }
-    else if (this->operatorr->type==OperatorType::Linear_T)
-    {
-        Linear* op = dynamic_cast<Linear*>(this->operatorr);
-        *C = ((this->C * this->H * this->W ) / op->in_features) * op->out_features; 
-        *H = 1;
-        *W = 1;
-    }
-    else if (this->operatorr->type==OperatorType::Add_T)
-    {
-        *C = this->C;
-        *H = this->H;
-        *W = this->W;
-    } 
-    else if (this->operatorr->type==OperatorType::Concat_T)
-    {
-        *C = this->C;
-        *H = this->H;
-        *W = this->W;
-    }
-    else if (this->operatorr->type==OperatorType::Scale_T)
-    {
-        *C = this->C;
-        int numbers[4];
-        this->get_scale_num_layer->give_next_layer_size(numbers, numbers+1, numbers+2, numbers+3); 
-        *H = numbers[2];
-        *W = numbers[3];
-        this->scale_H = *H;
-        this->scale_W = *W;
-    }
-    
-    
-    else{std::cerr<<"Error Operator Type!"<<std::endl;}
-}
-
-
-
-void layer_pre_pass_datasize(){
-    for (int i = 1; i < forward_layers.size(); i++)
-    {
-        Model_Layer* current_layer = forward_layers[i];
-        Assert(current_layer->previous_layers.size()!=0);
-        
-
-        if (current_layer->operatorr->type==OperatorType::Concat_T)
-        {
-            int numbers[4];
-            current_layer->previous_layers[0]->give_next_layer_size(numbers, numbers+1, numbers+2, numbers+3); 
-            current_layer->N = numbers[0];
-            current_layer->H = numbers[2];
-            current_layer->W = numbers[3];
-
-            int C_sum  = 0;
-            for (int j = 0; j < current_layer->previous_layers.size(); j++)
-            {
-                int numbers_j[4];
-                current_layer->previous_layers[j]->give_next_layer_size(numbers_j, numbers_j+1, numbers_j+2, numbers_j+3); 
-                Assert(current_layer->H == numbers_j[2]);
-                Assert(current_layer->W == numbers_j[3]);
-                current_layer->input_Cs.push_back(numbers_j[1]);
-                C_sum += numbers_j[1];
-            }
-            current_layer->C = C_sum;
-        }
-        else
-        {
-            int numbers[4];
-            current_layer->previous_layers[0]->give_next_layer_size(numbers, numbers+1, numbers+2, numbers+3); 
-            current_layer->N = numbers[0];
-            current_layer->C = numbers[1];
-            current_layer->H = numbers[2];
-            current_layer->W = numbers[3];
-        }
-
-        if (current_layer->operatorr->type==Add_T)
-        {
-            for (int j = 0; j < current_layer->previous_layers.size(); j++)
-            {
-                int numbers[4];
-                current_layer->previous_layers[j]->give_next_layer_size(numbers, numbers+1, numbers+2, numbers+3); 
-
-                Assert(numbers[1]==current_layer->C);
-                Assert(numbers[2]==current_layer->H);
-                Assert(numbers[3]==current_layer->W);
-            }
-        }
-    }
-    
-}
-
 
 string Tensor::name() const {
     return "tensor" + std::to_string(tensor_id);
@@ -217,163 +83,6 @@ void Tensor::print() const {
 }
 
 
-void Model_Layer::print_name(){
-    std::cout<<"Layer ID:"<<layer_id<<"; Name:";
-    switch (operatorr->type)
-    {
-    case OperatorType::AdaptiveAvgPool2d_T :
-        std::cout<<"AdaptiveAvgPool2d";
-        break;
-    
-    case OperatorType::BatchNorm2d_T :
-        std::cout<<"BatchNorm2d";
-        break;
-    
-    case OperatorType::Conv2d_T :
-        std::cout<<"Conv2d";
-        break;
-    
-    case OperatorType::Dropout_T :
-        std::cout<<"Dropout";
-        break;
-    
-    case OperatorType::Linear_T :
-        std::cout<<"Linear";
-        break;
-    
-    case OperatorType::MaxPool2d_T :
-        std::cout<<"MaxPool2d";
-        break;
-    
-    case OperatorType::ReLU_T :
-        std::cout<<"ReLU";
-        break;
-
-    case OperatorType::Add_T :
-        std::cout<<"Add";
-        break;
-
-    case OperatorType::Concat_T :
-        std::cout<<"Concat";
-        break;
-
-    case OperatorType::Scale_T :
-        std::cout<<"Scale";
-        break;
-
-    default:
-        break;
-    }
-    std::cout<<" ";
-    std::cout<<"("<<N<<","<<C<<","<<H<<","<<W<<")"<<std::endl;
-}
-
-
-void Model_Layer::print(){
-    print_name();
-    std::cout<<"Next Layers:"<<std::endl;
-    for (int i = 0; i < next_layers.size(); i++)
-    {
-        std::cout<<"Next Layer "<<i<<std::endl;
-        next_layers[i]->print_name();
-    }
-
-    std::cout<<"Previous Layers:"<<std::endl;
-    for (int i = 0; i < previous_layers.size(); i++)
-    {
-        std::cout<<"Previous Layer "<<i<<std::endl;
-        previous_layers[i]->print_name();
-    }
-    
-    std::cout<<"Input Tensor: ";
-    input_activation->print();
-    std::cout<<"Output Tensor: ";
-    output_activation->print();
-    if (d_input)
-    {
-        std::cout<<"d_Input Tensor: ";
-        d_input->print();
-    }
-    std::cout<<"d_Output Tensor: ";
-    d_output->print();
-    if (weight)
-    {
-        std::cout<<"Weight Tensor: ";
-        weight->print();
-        std::cout<<"d_Weight Tensor: ";
-        d_weight->print();
-    }
-    if (bias)
-    {
-        std::cout<<"Bias Tensor: ";
-        bias->print();
-        std::cout<<"d_Bias Tensor: ";
-        d_bias->print();
-    }
-    if (alpha_and_beta)
-    {
-        std::cout<<"Alpha_and_Beta Tensor: ";
-        alpha_and_beta->print();
-        std::cout<<"d_Alpha_and_beta Tensor: ";
-        d_alpha_and_beta->print();
-    }
-    if (mu)
-    {
-        std::cout<<"Mu Tensor: ";
-        mu->print();
-        std::cout<<"d_mu Tensor: ";
-        d_mu->print();
-    }
-    if (var)
-    {
-        std::cout<<"Var Tensor: ";
-        var->print();
-        std::cout<<"d_var Tensor: ";
-        d_var->print();
-    }
-    if (v1)
-    {
-        std::cout<<"V1 Tensor: ";
-        v1->print();
-        std::cout<<"d_v1: ";
-        d_v1->print();
-    }
-    if (v2)
-    {
-        std::cout<<"V2 Tensor: ";
-        v2->print();
-        std::cout<<"d_v2: ";
-        d_v2->print();
-    }
-    if (running_m)
-    {
-        std::cout<<"Running_m Tensor: ";
-        running_m->print();
-        std::cout<<"Running_v Tensor: ";
-        running_v->print();
-    }
-    if (musk_array)
-    {
-        std::cout<<"Musk_array Tensor: ";
-        musk_array->print();
-    }
-    for (int i = 0; i < other_inputs.size(); i++)
-    {
-        std::cout<<"Other Inputs Tensor "<<i<<": ";
-        other_inputs[i]->print();
-    }
-    for (int i = 0; i < other_d_inputs.size(); i++)
-    {
-        std::cout<<"Other D_Inputs Tensor "<<i<<": ";
-        other_d_inputs[i]->print();
-    }
-    for (int i = 0; i < other_d_outputs.size(); i++)
-    {
-        std::cout<<"Other D_Outputs Tensor "<<i<<": ";
-        other_d_outputs[i]->print();
-    }
-    std::cout<<"______________________________________________________________________________"<<std::endl;
-}
 
 Tensor::Tensor(long long size, bool glob) {
     static int tensor_count = 0;
@@ -405,534 +114,6 @@ unsigned long Tensor::getGlobalOffset() {
 
 
 
-//For transformers
-void transformer_op_datalow_pass(int borden){
-    for (int i = 0; i < forward_ops.size(); i++)
-    {
-        Model_OP* curr_op = forward_ops[i];
-        //General things:
-        //Allocate output:
-        if (transformer_tensors.find(curr_op->op_id)!=transformer_tensors.end())
-        {
-            OP_tensor out = transformer_tensors[curr_op->op_id];
-            curr_op->output_dim = out.dim;
-            curr_op->output_dims.reserve(out.dim);
-            for (int j : out.dims)
-            {
-                curr_op->output_dims.push_back(j);
-            }
-            
-            if (out.tensor!=nullptr)
-            {
-                curr_op->output_tensor = out.tensor;
-            }
-            else
-            {
-                long size = 1;
-                for (int j : out.dims)
-                {
-                    size = size * j;
-                }
-                bool global = false;
-                if (out.tensor_id < borden)
-                {
-                    global = true;
-                }
-                
-                curr_op->output_tensor = new Tensor(size*4, global);
-                tensor_list.push_back(curr_op->output_tensor);
-                // curr_op->output_tensor->print();
-                transformer_tensors[curr_op->op_id].tensor = curr_op->output_tensor;
-            }
-            
-        }else
-        {
-            OP_tensor out_size = curr_op->input_tensors[0];
-            long size = 1;
-            for (auto j : out_size.dims)
-            {
-                size = size * j;
-            }
-            bool global = false;
-            
-            curr_op->output_tensor = new Tensor(size*4, global);
-            tensor_list.push_back(curr_op->output_tensor);
-            // curr_op->output_tensor->print();
-        }
-
-        //Allocate Input:
-        for (int j = 0; j < curr_op->input_num; j++)
-        {
-            int id = curr_op->input_tensors[j].tensor_id;
-
-            if (transformer_tensors.find(id)!=transformer_tensors.end())
-            {
-                OP_tensor in_curr = transformer_tensors[id];
-                if (in_curr.tensor!=nullptr)
-                {
-                    curr_op->input_tensors[j].tensor = in_curr.tensor;
-                }
-                else
-                {
-                    long size = 1;
-                    for (int j : in_curr.dims)
-                    {
-                        size = size * j;
-                    }
-                    bool global = false;
-                    if (in_curr.tensor_id < borden)
-                    {
-                        global = true;
-                    }
-                    
-                    curr_op->input_tensors[j].tensor = new Tensor(size*4, global);
-                    tensor_list.push_back(curr_op->input_tensors[j].tensor);
-                    // curr_op->input_tensors[j].tensor->print();
-                    transformer_tensors[id].tensor = curr_op->input_tensors[j].tensor;
-                }
-            }else
-            {
-                exit(1);
-            }
-        }
-
-
-        for (int j = 0; j < curr_op->input_tensors.size(); j++)
-        {
-            if (curr_op->type=="Power")
-            {
-                if (curr_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    curr_op->input_tensors[j].is_const = true;
-                }
-                else
-                {
-                    if (op_map.find(curr_op->input_tensors[j].tensor_id)!=op_map.end())
-                    {
-                        curr_op->input_tensors[j].d_tensor = new Tensor(curr_op->input_tensors[j].tensor->size_in_byte, false);
-                        tensor_list.push_back(curr_op->input_tensors[j].d_tensor);
-                        Model_OP* source_op = op_map[curr_op->input_tensors[j].tensor_id];
-                        source_op->d_output_tensors.push_back(curr_op->input_tensors[j].d_tensor);
-                    }
-                    else
-                    {
-                        curr_op->input_tensors[j].is_const = true;
-                    }
-                }
-            }else
-            {
-                if (curr_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    curr_op->input_tensors[j].d_tensor = new Tensor(curr_op->input_tensors[j].tensor->size_in_byte, false);
-                    tensor_list.push_back(curr_op->input_tensors[j].d_tensor);
-                    if (op_map.find(curr_op->input_tensors[j].tensor_id)!=op_map.end())
-                    {
-                        Model_OP* source_op = op_map[curr_op->input_tensors[j].tensor_id];
-                        source_op->d_output_tensors.push_back(curr_op->input_tensors[j].d_tensor);
-                    }
-                }else{
-                    if (op_map.find(curr_op->input_tensors[j].tensor_id)!=op_map.end())
-                    {
-                        curr_op->input_tensors[j].d_tensor = new Tensor(curr_op->input_tensors[j].tensor->size_in_byte, false);
-                        Model_OP* source_op = op_map[curr_op->input_tensors[j].tensor_id];
-                        tensor_list.push_back(curr_op->input_tensors[j].d_tensor);
-                        source_op->d_output_tensors.push_back(curr_op->input_tensors[j].d_tensor);
-                    }
-                    else
-                    {
-                        curr_op->input_tensors[j].is_const = true;
-                    }
-                }
-            }
-        }
-
-        if (i==forward_ops.size()-1)
-        {
-            Tensor* loss = new Tensor(curr_op->output_tensor->size_in_byte, false);
-            tensor_list.push_back(loss);
-            curr_op->d_output_tensors.push_back(loss);
-        }
-        
-    }
-
-    // for (int i = 0; i < forward_ops.size(); i++)
-    // {
-    //     forward_ops[i]->print();
-    // }
-    
-}
-
-
-
-void Model_OP::print(){
-    std::cout<<op_id<<": "<<type<<std::endl;
-  
-    std::cout<<"Input Tensor(s): "<<std::endl;
-    for (int i = 0; i < this->input_num; i++)
-    {
-        this->input_tensors[i].tensor->print();
-    }
-    
-    std::cout<<"Output Tensor: "<<std::endl;
-    output_tensor->print();
-
-    std::cout<<"d_Input Tensor(s): "<<std::endl;
-    for (int i = 0; i < this->input_num; i++)
-    {
-        if (this->input_tensors[i].d_tensor)
-        {
-            this->input_tensors[i].d_tensor->print();
-        }
-    }
-
-    std::cout<<"d_Output Tensor: "<<std::endl;
-    for (int i = 0; i < d_output_tensors.size(); i++)
-    {
-        d_output_tensors[i]->print();
-    }
-    
-    std::cout<<"______________________________________________________________________________"<<std::endl;
-}
-
-
-
-
-
-
-void layer_first_pass_dataflow(){
-
-    //Forward propogation
-    for (size_t i = 0; i < forward_layers.size(); i++)
-    {
-        Model_Layer* current_layer = forward_layers[i];
-        Assert(current_layer);
-
-        int N, C ,H, W;
-        N = current_layer->N;
-        C = current_layer->C;
-        H = current_layer->H;
-        W = current_layer->W;
-
-        if (current_layer->operatorr->type==OperatorType::Conv2d_T)
-        {
-            Conv2d* op = dynamic_cast<Conv2d*>(current_layer->operatorr);
-            int NN, K, P, Q;
-            current_layer->give_next_layer_size(&NN, &K, &P, &Q);
-            int R = op->kernel_size_r;
-            int S = op->kernel_size_s;
-
-
-            if (i==0)
-            {
-                current_layer->input_activation = new Tensor((long long) N*C*H*W*4);
-                tensor_list.push_back(current_layer->input_activation);
-            }
-            else
-            {
-                current_layer->input_activation = current_layer->previous_layers[0]->output_activation; // Previous layer's output
-            }
-
-            current_layer->output_activation = new Tensor((long long) N*K*P*Q*4);
-            tensor_list.push_back(current_layer->output_activation);
-            current_layer->weight = new Tensor((long long) K*C*R*S*4, true);
-            tensor_list.push_back(current_layer->weight);
-            current_layer->d_weight = new Tensor((long long) K*C*R*S*4);
-            tensor_list.push_back(current_layer->d_weight);
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-
-        }
-        else if (current_layer->operatorr->type==OperatorType::ReLU_T)
-        {
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output 
-
-            ReLU* op = dynamic_cast<ReLU*>(current_layer->operatorr);
-            if (!op->inplace)
-            {
-                current_layer->output_activation = new Tensor((long long) N*C*H*W*4);
-                tensor_list.push_back(current_layer->output_activation);
-            }
-            else
-            {
-                current_layer->output_activation = current_layer->input_activation;
-            }
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::AdaptiveAvgPool2d_T || current_layer->operatorr->type==OperatorType::MaxPool2d_T)
-        {
-            int NN, K, P, Q;
-            current_layer->give_next_layer_size(&NN, &K, &P, &Q);
-
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation; //Previous layer's output
-            current_layer->output_activation = new Tensor((long long) NN*K*P*Q*4);
-            tensor_list.push_back(current_layer->output_activation);
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Dropout_T)
-        {
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output 
-
-            current_layer->musk_array = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->musk_array);
-
-            Dropout* op = dynamic_cast<Dropout*>(current_layer->operatorr);
-            if (!op->inplace)
-            {
-                current_layer->output_activation = new Tensor((long long) N*C*H*W*4);
-                tensor_list.push_back(current_layer->output_activation);
-            }
-            else
-            {
-                current_layer->output_activation = current_layer->input_activation;
-            }
-
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Linear_T)
-        {
-            int NN, K, P, Q;
-            current_layer->give_next_layer_size(&NN, &K, &P, &Q);
-            Linear* op = dynamic_cast<Linear*>(current_layer->operatorr);
-            int H_in, H_out;
-            H_in = op->in_features;
-            H_out = op->out_features;
-
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output
-            current_layer->weight = new Tensor((long long) H_in*H_out*4, true);
-            tensor_list.push_back(current_layer->weight);
-            current_layer->output_activation = new Tensor((long long) NN*K*P*Q*4);
-            tensor_list.push_back(current_layer->output_activation);
-
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-            current_layer->d_weight = new Tensor((long long) H_in*H_out*4);
-            tensor_list.push_back(current_layer->d_weight);
-
-            if (op->bias)
-            {
-                current_layer->bias = new Tensor((long long) H_out*4, true);
-                tensor_list.push_back(current_layer->bias);
-                current_layer->d_bias = new Tensor((long long) H_out*4);
-                tensor_list.push_back(current_layer->d_bias);
-            }
-            
-        }
-        else if (current_layer->operatorr->type==OperatorType::BatchNorm2d_T)
-        {
-            BatchNorm2d* op = dynamic_cast<BatchNorm2d*>(current_layer->operatorr);
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output
-
-            current_layer->output_activation = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->output_activation);
-
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-
-            current_layer->alpha_and_beta = new Tensor((long long) C*2*4, true);
-            tensor_list.push_back(current_layer->alpha_and_beta);
-
-            current_layer->d_alpha_and_beta = new Tensor((long long) C*2*4);
-            tensor_list.push_back(current_layer->d_alpha_and_beta);
-
-            //The following are workspace for BN
-
-            current_layer->mu = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->mu);
-
-            current_layer->var = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->var);
-
-            current_layer->v1 = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->v1);
-
-            current_layer->v2 = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->v2);
-
-            current_layer->d_mu = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->d_mu);
-
-            current_layer->d_var = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->d_var);
-
-            current_layer->d_v1 = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_v1);
-
-            current_layer->d_v2 = new Tensor((long long) C*4);
-            tensor_list.push_back(current_layer->d_v2);
-            
-
-            if (op->track_running_stats)
-            {
-                current_layer->running_m = new Tensor((long long) C*4, true);
-                tensor_list.push_back(current_layer->running_m);
-                current_layer->running_v = new Tensor((long long) C*4, true);
-                tensor_list.push_back(current_layer->running_v);
-            }
-            
-        }
-        else if (current_layer->operatorr->type==OperatorType::Add_T)
-        {
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output
-            Assert(current_layer->previous_layers.size()!=1);
-
-            for (int i = 1; i < current_layer->previous_layers.size(); i++)
-            {
-                current_layer->other_inputs.push_back(current_layer->previous_layers[i]->output_activation);
-            }
-            
-            current_layer->output_activation = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->output_activation);
-
-            //No d_inputs need to be allocated. For Add layer, d_input is d_output
-            
-        }
-        else if (current_layer->operatorr->type==OperatorType::Concat_T)
-        {
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;
-            Assert(current_layer->previous_layers.size()!=1);
-
-            current_layer->d_input = new Tensor((long long) N*H*W*current_layer->previous_layers[0]->C*4);
-            tensor_list.push_back(current_layer->d_input);
-
-            for (int i = 1; i < current_layer->previous_layers.size(); i++)
-            {
-                current_layer->other_inputs.push_back(current_layer->previous_layers[i]->output_activation);
-                Tensor* new_tensor = new Tensor((long long) N*H*W*current_layer->previous_layers[i]->C*4);
-                current_layer->other_d_inputs.push_back(new_tensor);
-                tensor_list.push_back(new_tensor);
-            }
-
-            current_layer->output_activation = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->output_activation);
-            
-        }
-        else if (current_layer->operatorr->type==OperatorType::Scale_T)
-        {
-            current_layer->input_activation = current_layer->previous_layers[0]->output_activation;  // Previous layer's output 
-
-            int NN, K, P, Q;
-            current_layer->give_next_layer_size(&NN, &K, &P, &Q);
-            current_layer->output_activation = new Tensor((long long) NN*K*P*Q*4);
-            tensor_list.push_back(current_layer->output_activation);
-
-            current_layer->d_input = new Tensor((long long) N*C*H*W*4);
-            tensor_list.push_back(current_layer->d_input);
-        }
-        
-        
-    }
-
-
-    for (int i = (int)forward_layers.size() - 1; i >= 0; i--)
-    {
-        Model_Layer* current_layer = forward_layers[i];
-
-        int N, C ,H, W;
-        N = current_layer->N;
-        C = current_layer->C;
-        H = current_layer->H;
-        W = current_layer->W;
-
-        int NN, K, P, Q;
-            current_layer->give_next_layer_size(&NN, &K, &P, &Q);
-
-        if (i==forward_layers.size() - 1)
-        {
-            current_layer->d_output = new Tensor((long long) NN*K*P*Q*4);
-            tensor_list.push_back(current_layer->d_output);
-        }
-        else
-        {
-            for (int i = 0; i < current_layer->next_layers.size(); i++)
-            {
-                Model_Layer* one_of_next_layer = current_layer->next_layers[i];
-                if (one_of_next_layer->operatorr->type==OperatorType::Add_T)
-                {
-                    if (i==0)
-                    {
-                        current_layer->d_output = one_of_next_layer->d_output;
-                    }
-                    else
-                    {
-                        current_layer->other_d_outputs.push_back(one_of_next_layer->d_output);
-                    }
-                }
-                else if (one_of_next_layer->operatorr->type==OperatorType::Concat_T)
-                {
-                    /* code */
-                    //First find which index current_layer is in this concat layer's input list;
-                    int index = -1;
-                    for (int j = 0; j < one_of_next_layer->previous_layers.size(); j++)
-                    {
-                        if (one_of_next_layer->previous_layers[j]==current_layer)
-                        {
-                            index = j;
-                            break;
-                        }
-                    }
-                    Assert(index>=0);
-
-                    if (i==0)
-                    {
-                        if (index==0)
-                        {
-                            current_layer->d_output = one_of_next_layer->d_input;
-                        }
-                        else
-                        {
-                            current_layer->d_output = one_of_next_layer->other_d_inputs[index-1];
-                        }
-                    }
-                    else
-                    {
-                        if (index==0)
-                        {
-                            current_layer->other_d_outputs.push_back(one_of_next_layer->d_input);
-                        }
-                        else
-                        {
-                            current_layer->other_d_outputs.push_back(one_of_next_layer->other_d_inputs[index-1]);
-                        }
-                    }
-                }
-                else
-                {
-                    if (i==0)
-                    {
-                        current_layer->d_output = one_of_next_layer->d_input;
-                    }
-                    else
-                    {
-                        current_layer->other_d_outputs.push_back(one_of_next_layer->d_input);
-                    }
-                }
-                
-                
-            }
-        }
-    }
-}
-
-
-CUDAKernel::CUDAKernel(CUDAKernelType t, Model_Layer* layer){
-    kernel_id = kernel_index;
-    kernel_index++;
-    type = t;
-    parent_layer = layer;
-}
-
-
-CUDAKernel::CUDAKernel(CUDAKernelType t, Model_OP* op){
-    kernel_id = kernel_index;
-    kernel_index++;
-    type = t;
-    parent_op = op;
-}
-
-
 CUDAKernel::CUDAKernel(int kernel_id,
                        CUDAKernelType t,
                        std::vector<Tensor*> input_tensor_list,
@@ -948,69 +129,69 @@ CUDAKernel::CUDAKernel(int kernel_id,
 
 void CUDAKernel::print(){
     std::cout<<"Kernel ID: "<<kernel_id<<", "<< "Name: "<<print_kerneltype_array[type]<<std::endl;
-    if (this->parent_layer)
-    {
-        std::cout<<"Parent Layer ID:"<<parent_layer->layer_id<<"; Name:";
-        switch (parent_layer->operatorr->type)
-        {
-            case OperatorType::AdaptiveAvgPool2d_T :
-                std::cout<<"AdaptiveAvgPool2d";
-                break;
+    // if (this->parent_layer)
+    // {
+    //     std::cout<<"Parent Layer ID:"<<parent_layer->layer_id<<"; Name:";
+    //     switch (parent_layer->operatorr->type)
+    //     {
+    //         case OperatorType::AdaptiveAvgPool2d_T :
+    //             std::cout<<"AdaptiveAvgPool2d";
+    //             break;
 
-            case OperatorType::BatchNorm2d_T :
-                std::cout<<"BatchNorm2d";
-                break;
+    //         case OperatorType::BatchNorm2d_T :
+    //             std::cout<<"BatchNorm2d";
+    //             break;
 
-            case OperatorType::Conv2d_T :
-                std::cout<<"Conv2d";
-                break;
+    //         case OperatorType::Conv2d_T :
+    //             std::cout<<"Conv2d";
+    //             break;
 
-            case OperatorType::Dropout_T :
-                std::cout<<"Dropout";
-                break;
+    //         case OperatorType::Dropout_T :
+    //             std::cout<<"Dropout";
+    //             break;
 
-            case OperatorType::Linear_T :
-                std::cout<<"Linear";
-                break;
+    //         case OperatorType::Linear_T :
+    //             std::cout<<"Linear";
+    //             break;
 
-            case OperatorType::MaxPool2d_T :
-                std::cout<<"MaxPool2d";
-                break;
+    //         case OperatorType::MaxPool2d_T :
+    //             std::cout<<"MaxPool2d";
+    //             break;
 
-            case OperatorType::ReLU_T :
-                std::cout<<"ReLU";
-                break;
+    //         case OperatorType::ReLU_T :
+    //             std::cout<<"ReLU";
+    //             break;
 
-            case OperatorType::Add_T :
-                std::cout<<"Add";
-                break;
+    //         case OperatorType::Add_T :
+    //             std::cout<<"Add";
+    //             break;
 
-            case OperatorType::Concat_T :
-                std::cout<<"Concat";
-                break;
+    //         case OperatorType::Concat_T :
+    //             std::cout<<"Concat";
+    //             break;
 
-            case OperatorType::Scale_T :
-                std::cout<<"Scale";
-                break;
+    //         case OperatorType::Scale_T :
+    //             std::cout<<"Scale";
+    //             break;
 
-            default:
-                break;
-        }
-        std::cout<<std::endl;
-    } else if (parent_op) {
-        std::cout<<"Parent OP ID:"<<parent_op->op_id<<"; Name: "<<parent_op->type<<std::endl;
-    } else {
-        std::cout<<"No parent info"<<std::endl;
-    }
+    //         default:
+    //             break;
+    //     }
+    //     std::cout<<std::endl;
+    // } else if (parent_op) {
+    //     std::cout<<"Parent OP ID:"<<parent_op->op_id<<"; Name: "<<parent_op->type<<std::endl;
+    // } else {
+    //     std::cout<<"No parent info"<<std::endl;
+    // }
 
 
     std::cout<<"Execution Time:            "<< execution_cycles<<std::endl;
     std::cout<<"Execution Time (input pf): "<< input_pf_execution_cycles<<std::endl;
     std::cout<<"Execution Time (pf):       "<< pf_execution_cycles<<std::endl;
-    if (this->parent_layer)
-    {
-        std::cout<<"("<<parent_layer->N<<","<<parent_layer->C<<","<<parent_layer->H<<","<<parent_layer->W<<")"<<std::endl;
-    }
+    // if (this->parent_layer)
+    // {
+    //     std::cout<<"("<<parent_layer->N<<","<<parent_layer->C<<","<<parent_layer->H<<","<<parent_layer->W<<")"<<std::endl;
+    // }
 
     std::cout<<"Input Tensors:"<<std::endl;
     for (auto it = inputs.begin(); it != inputs.end(); it++) {
@@ -1076,7 +257,7 @@ void CUDAKernel::getTensorBreakdown(std::vector<Tensor*> &inputs,
                                     std::vector<Tensor*> &intermediates) const {
   std::unordered_set<Tensor *> required_tensors;
   getRequiredTensors(required_tensors);
-  Model_Layer* current_layer = parent_layer;
+//   Model_Layer* current_layer = parent_layer;
   if (kernel_id == 0) {
     for (Tensor *tensor : this->outputs) {
       inputs.push_back(tensor);
@@ -1091,686 +272,686 @@ void CUDAKernel::getTensorBreakdown(std::vector<Tensor*> &inputs,
   }
 }
 
-void layer_second_pass_scheduling_kernels(){
-    //Forward propogation
-    for (size_t i = 0; i < forward_layers.size(); i++)
-    {
-        Model_Layer* current_layer = forward_layers[i];
+// void layer_second_pass_scheduling_kernels(){
+//     //Forward propogation
+//     for (size_t i = 0; i < forward_layers.size(); i++)
+//     {
+//         Model_Layer* current_layer = forward_layers[i];
     
-        if (current_layer->operatorr->type==OperatorType::Conv2d_T)
-        {
-            if (i == 0) //A0
-            {
-                kernel_list.emplace_back(CUDAKernelType::LoadData_A0, current_layer);
-                kernel_list.back().outputs.insert(current_layer->input_activation);
-            }
+//         if (current_layer->operatorr->type==OperatorType::Conv2d_T)
+//         {
+//             if (i == 0) //A0
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::LoadData_A0, current_layer);
+//                 kernel_list.back().outputs.insert(current_layer->input_activation);
+//             }
 
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
 
-        }
-        else if (current_layer->operatorr->type==OperatorType::ReLU_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::ReLU_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
-        else if (current_layer->operatorr->type==OperatorType::AdaptiveAvgPool2d_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::AdaptiveAvgPool2d_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
-        else if (current_layer->operatorr->type==OperatorType::MaxPool2d_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::MaxPool2d_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::ReLU_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::ReLU_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::AdaptiveAvgPool2d_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::AdaptiveAvgPool2d_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::MaxPool2d_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::MaxPool2d_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
         
-        else if (current_layer->operatorr->type==OperatorType::Dropout_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Dropout_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->musk_array);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Linear_T)
-        {
-            Linear* op = dynamic_cast<Linear*>(current_layer->operatorr);
-            kernel_list.emplace_back(CUDAKernelType::Linear_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            if (op->bias)
-            {
-                kernel_list.back().inputs.insert(current_layer->bias);
-            }
-            kernel_list.back().outputs.insert(current_layer->output_activation);
+//         else if (current_layer->operatorr->type==OperatorType::Dropout_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Dropout_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->musk_array);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Linear_T)
+//         {
+//             Linear* op = dynamic_cast<Linear*>(current_layer->operatorr);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             if (op->bias)
+//             {
+//                 kernel_list.back().inputs.insert(current_layer->bias);
+//             }
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
             
-        }
-        else if (current_layer->operatorr->type==OperatorType::BatchNorm2d_T)
-        {
-            BatchNorm2d* op = dynamic_cast<BatchNorm2d*>(current_layer->operatorr);
-            kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
-            if (op->track_running_stats)
-            {
-                kernel_list.back().inputs.insert(current_layer->running_m);
-                kernel_list.back().inputs.insert(current_layer->running_v);
-                kernel_list.back().outputs.insert(current_layer->running_m);
-                kernel_list.back().outputs.insert(current_layer->running_v);
-            }
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-            kernel_list.back().outputs.insert(current_layer->mu);
-            kernel_list.back().outputs.insert(current_layer->var);
-            kernel_list.back().outputs.insert(current_layer->v1);
-            kernel_list.back().outputs.insert(current_layer->v2);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Add_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Add_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            for (int i = 0; i < current_layer->other_inputs.size(); i++)
-            {
-                kernel_list.back().inputs.insert(current_layer->other_inputs[i]);
-            }
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Concat_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Concat_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            for (int i = 0; i < current_layer->other_inputs.size(); i++)
-            {
-                kernel_list.back().inputs.insert(current_layer->other_inputs[i]);
-            }
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Scale_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Scale_Forward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->output_activation);
-        }
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::BatchNorm2d_T)
+//         {
+//             BatchNorm2d* op = dynamic_cast<BatchNorm2d*>(current_layer->operatorr);
+//             kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
+//             if (op->track_running_stats)
+//             {
+//                 kernel_list.back().inputs.insert(current_layer->running_m);
+//                 kernel_list.back().inputs.insert(current_layer->running_v);
+//                 kernel_list.back().outputs.insert(current_layer->running_m);
+//                 kernel_list.back().outputs.insert(current_layer->running_v);
+//             }
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//             kernel_list.back().outputs.insert(current_layer->mu);
+//             kernel_list.back().outputs.insert(current_layer->var);
+//             kernel_list.back().outputs.insert(current_layer->v1);
+//             kernel_list.back().outputs.insert(current_layer->v2);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Add_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Add_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             for (int i = 0; i < current_layer->other_inputs.size(); i++)
+//             {
+//                 kernel_list.back().inputs.insert(current_layer->other_inputs[i]);
+//             }
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Concat_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Concat_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             for (int i = 0; i < current_layer->other_inputs.size(); i++)
+//             {
+//                 kernel_list.back().inputs.insert(current_layer->other_inputs[i]);
+//             }
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Scale_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Scale_Forward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->output_activation);
+//         }
 
-    }
+//     }
 
-    //Make loss 
-    kernel_list.emplace_back(CUDAKernelType::makeLoss, forward_layers[forward_layers.size()-1]);
-    kernel_list.back().inputs.insert(forward_layers[forward_layers.size()-1]->output_activation);
-    kernel_list.back().outputs.insert(forward_layers[forward_layers.size()-1]->d_output);
+//     //Make loss 
+//     kernel_list.emplace_back(CUDAKernelType::makeLoss, forward_layers[forward_layers.size()-1]);
+//     kernel_list.back().inputs.insert(forward_layers[forward_layers.size()-1]->output_activation);
+//     kernel_list.back().outputs.insert(forward_layers[forward_layers.size()-1]->d_output);
 
-    //Backward Propogation
-    for (int i = (int)forward_layers.size() - 1; i >= 0; i--)
-    {
-        Model_Layer* current_layer = forward_layers[i];
+//     //Backward Propogation
+//     for (int i = (int)forward_layers.size() - 1; i >= 0; i--)
+//     {
+//         Model_Layer* current_layer = forward_layers[i];
 
-        if (current_layer->other_d_outputs.size()!=0)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Add_MultiGredient, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            for (int i = 0; i < current_layer->other_d_outputs.size(); i++)
-            {
-                kernel_list.back().inputs.insert(current_layer->other_d_outputs[i]);
-            }
-            kernel_list.back().outputs.insert(current_layer->d_output);
-        }
+//         if (current_layer->other_d_outputs.size()!=0)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Add_MultiGredient, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             for (int i = 0; i < current_layer->other_d_outputs.size(); i++)
+//             {
+//                 kernel_list.back().inputs.insert(current_layer->other_d_outputs[i]);
+//             }
+//             kernel_list.back().outputs.insert(current_layer->d_output);
+//         }
         
 
-        if (current_layer->operatorr->type==OperatorType::Conv2d_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Weight, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->d_weight);
+//         if (current_layer->operatorr->type==OperatorType::Conv2d_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Weight, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->d_weight);
 
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Input, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            kernel_list.back().outputs.insert(current_layer->d_input);
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Input, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
 
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Apply_Grad, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_weight);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            kernel_list.back().outputs.insert(current_layer->weight);
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Apply_Grad, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_weight);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             kernel_list.back().outputs.insert(current_layer->weight);
 
-        }
-        else if (current_layer->operatorr->type==OperatorType::ReLU_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::ReLU_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::AdaptiveAvgPool2d_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::AdaptiveAvgPool2d_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::MaxPool2d_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::MaxPool2d_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Dropout_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Dropout_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->musk_array);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::ReLU_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::ReLU_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::AdaptiveAvgPool2d_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::AdaptiveAvgPool2d_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::MaxPool2d_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::MaxPool2d_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Dropout_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Dropout_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->musk_array);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
 
-        }
-        else if (current_layer->operatorr->type==OperatorType::Linear_T)
-        {
-            Linear* op = dynamic_cast<Linear*>(current_layer->operatorr);
-            if (op->bias)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Bias, current_layer);
-                kernel_list.back().inputs.insert(current_layer->d_output);
-                kernel_list.back().outputs.insert(current_layer->d_bias);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Linear_T)
+//         {
+//             Linear* op = dynamic_cast<Linear*>(current_layer->operatorr);
+//             if (op->bias)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Bias, current_layer);
+//                 kernel_list.back().inputs.insert(current_layer->d_output);
+//                 kernel_list.back().outputs.insert(current_layer->d_bias);
 
-                kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Bias, current_layer);
-                kernel_list.back().inputs.insert(current_layer->d_bias);
-                kernel_list.back().inputs.insert(current_layer->bias);
-                kernel_list.back().outputs.insert(current_layer->bias);
-            }
+//                 kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Bias, current_layer);
+//                 kernel_list.back().inputs.insert(current_layer->d_bias);
+//                 kernel_list.back().inputs.insert(current_layer->bias);
+//                 kernel_list.back().outputs.insert(current_layer->bias);
+//             }
             
-            kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Weight, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().inputs.insert(current_layer->input_activation);
-            kernel_list.back().outputs.insert(current_layer->d_weight);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Weight, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().inputs.insert(current_layer->input_activation);
+//             kernel_list.back().outputs.insert(current_layer->d_weight);
 
-            kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Input, current_layer);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Input, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
 
-            kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Weight, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_weight);
-            kernel_list.back().inputs.insert(current_layer->weight);
-            kernel_list.back().outputs.insert(current_layer->weight);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Weight, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_weight);
+//             kernel_list.back().inputs.insert(current_layer->weight);
+//             kernel_list.back().outputs.insert(current_layer->weight);
             
-        }
-        else if (current_layer->operatorr->type==OperatorType::BatchNorm2d_T)
-        {
-            BatchNorm2d* op = dynamic_cast<BatchNorm2d*>(current_layer->operatorr);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::BatchNorm2d_T)
+//         {
+//             BatchNorm2d* op = dynamic_cast<BatchNorm2d*>(current_layer->operatorr);
 
-            kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().inputs.insert(current_layer->v1);
-            kernel_list.back().inputs.insert(current_layer->v2);
-            kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-            kernel_list.back().outputs.insert(current_layer->d_alpha_and_beta);
-            kernel_list.back().outputs.insert(current_layer->d_mu);
-            kernel_list.back().outputs.insert(current_layer->d_var);
-            kernel_list.back().outputs.insert(current_layer->d_v1);
-            kernel_list.back().outputs.insert(current_layer->d_v2);
+//             kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().inputs.insert(current_layer->v1);
+//             kernel_list.back().inputs.insert(current_layer->v2);
+//             kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//             kernel_list.back().outputs.insert(current_layer->d_alpha_and_beta);
+//             kernel_list.back().outputs.insert(current_layer->d_mu);
+//             kernel_list.back().outputs.insert(current_layer->d_var);
+//             kernel_list.back().outputs.insert(current_layer->d_v1);
+//             kernel_list.back().outputs.insert(current_layer->d_v2);
 
-            kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Apply_Grad, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_alpha_and_beta);
-            kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
-            kernel_list.back().outputs.insert(current_layer->alpha_and_beta);
-        }
-        else if (current_layer->operatorr->type==OperatorType::Concat_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Concat_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-            for (int j = 0; j < current_layer->other_d_inputs.size(); j++)
-            {
-                kernel_list.back().outputs.insert(current_layer->other_d_inputs[j]);
-            }
-        }
-        else if (current_layer->operatorr->type==OperatorType::Scale_T)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Scale_Backward, current_layer);
-            kernel_list.back().inputs.insert(current_layer->d_output);
-            kernel_list.back().outputs.insert(current_layer->d_input);
-        }
+//             kernel_list.emplace_back(CUDAKernelType::BatchNorm2d_Apply_Grad, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_alpha_and_beta);
+//             kernel_list.back().inputs.insert(current_layer->alpha_and_beta);
+//             kernel_list.back().outputs.insert(current_layer->alpha_and_beta);
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Concat_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Concat_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//             for (int j = 0; j < current_layer->other_d_inputs.size(); j++)
+//             {
+//                 kernel_list.back().outputs.insert(current_layer->other_d_inputs[j]);
+//             }
+//         }
+//         else if (current_layer->operatorr->type==OperatorType::Scale_T)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Scale_Backward, current_layer);
+//             kernel_list.back().inputs.insert(current_layer->d_output);
+//             kernel_list.back().outputs.insert(current_layer->d_input);
+//         }
         
         
-    }
-}
+//     }
+// }
 
 
 
-void transformer_scheduling_kernels(){
-    //Forward propogation
-    for (size_t i = 0; i < forward_ops.size(); i++)
-    {
-        Model_OP* current_op = forward_ops[i];
+// void transformer_scheduling_kernels(){
+//     //Forward propogation
+//     for (size_t i = 0; i < forward_ops.size(); i++)
+//     {
+//         Model_OP* current_op = forward_ops[i];
         
-        if (current_op->type=="GatherV2")
-        {
-            kernel_list.emplace_back(CUDAKernelType::GatherV2_Forward, current_op);
-        }
-        else if (current_op->type=="Convolution")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Forward, current_op);
-        }
-        else if (current_op->type=="Dot")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Linear_Forward, current_op);
-        }
-        else if (current_op->type=="Relu")
-        {
-            kernel_list.emplace_back(CUDAKernelType::ReLU_Forward, current_op);
-        }
-        else if (current_op->type=="Add")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Add_Forward, current_op);
-        }
-        else if (current_op->type=="BatchMatMul")
-        {
-            kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Forward, current_op);
-        }
-        else if (current_op->type=="Divide")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Divide_Forward, current_op);
-        }
-        else if (current_op->type=="Multiply")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Multiply_Forward, current_op);
-        }
-        else if (current_op->type=="Power")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Power_Forward, current_op);
-        }
-        else if (current_op->type=="SoftmaxBasic")
-        {
-            kernel_list.emplace_back(CUDAKernelType::SoftmaxBasic_Forward, current_op);
-        }
-        else if (current_op->type=="Sqrt")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Sqrt_Forward, current_op);
-        }
-        else if (current_op->type=="Subtract")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Subtract_Forward, current_op);
-        }
-        else if (current_op->type=="Sum")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Sum_Forward, current_op);
-        }
-        else if (current_op->type=="Tanh")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Tanh_Forward, current_op);
-        }
-        else if (current_op->type=="Erf")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Erf_Forward, current_op);
-        }
-        else{
-            exit(1);
-        }
+//         if (current_op->type=="GatherV2")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::GatherV2_Forward, current_op);
+//         }
+//         else if (current_op->type=="Convolution")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Forward, current_op);
+//         }
+//         else if (current_op->type=="Dot")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Forward, current_op);
+//         }
+//         else if (current_op->type=="Relu")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::ReLU_Forward, current_op);
+//         }
+//         else if (current_op->type=="Add")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Add_Forward, current_op);
+//         }
+//         else if (current_op->type=="BatchMatMul")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Forward, current_op);
+//         }
+//         else if (current_op->type=="Divide")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Divide_Forward, current_op);
+//         }
+//         else if (current_op->type=="Multiply")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Multiply_Forward, current_op);
+//         }
+//         else if (current_op->type=="Power")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Power_Forward, current_op);
+//         }
+//         else if (current_op->type=="SoftmaxBasic")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::SoftmaxBasic_Forward, current_op);
+//         }
+//         else if (current_op->type=="Sqrt")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Sqrt_Forward, current_op);
+//         }
+//         else if (current_op->type=="Subtract")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Subtract_Forward, current_op);
+//         }
+//         else if (current_op->type=="Sum")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Sum_Forward, current_op);
+//         }
+//         else if (current_op->type=="Tanh")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Tanh_Forward, current_op);
+//         }
+//         else if (current_op->type=="Erf")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Erf_Forward, current_op);
+//         }
+//         else{
+//             exit(1);
+//         }
 
-        for (int j = 0; j < current_op->input_num; j++)
-        {
-            kernel_list.back().inputs.insert(current_op->input_tensors[j].tensor);
-        }
-        kernel_list.back().outputs.insert(current_op->output_tensor);
-    }
+//         for (int j = 0; j < current_op->input_num; j++)
+//         {
+//             kernel_list.back().inputs.insert(current_op->input_tensors[j].tensor);
+//         }
+//         kernel_list.back().outputs.insert(current_op->output_tensor);
+//     }
 
-    //makeLoss
-    kernel_list.emplace_back(CUDAKernelType::makeLoss, forward_ops[forward_ops.size()-1]);
-    kernel_list.back().inputs.insert(forward_ops[forward_ops.size()-1]->output_tensor);
-    kernel_list.back().outputs.insert(forward_ops[forward_ops.size()-1]->d_output_tensors[0]);
+//     //makeLoss
+//     kernel_list.emplace_back(CUDAKernelType::makeLoss, forward_ops[forward_ops.size()-1]);
+//     kernel_list.back().inputs.insert(forward_ops[forward_ops.size()-1]->output_tensor);
+//     kernel_list.back().outputs.insert(forward_ops[forward_ops.size()-1]->d_output_tensors[0]);
 
 
-    //Backward_pass
-    for (int i = (int)forward_ops.size() - 1; i >= 0; i--){
+//     //Backward_pass
+//     for (int i = (int)forward_ops.size() - 1; i >= 0; i--){
 
-        Model_OP* current_op = forward_ops[i];
+//         Model_OP* current_op = forward_ops[i];
 
-        //First fuse the multiple d_outputs:
-        if (current_op->d_output_tensors.size()>1)
-        {
-            kernel_list.emplace_back(CUDAKernelType::Add_MultiGredient, current_op);
-            for (int j = 0; j < current_op->d_output_tensors.size(); j++)
-            {
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[j]);
-            }
-            kernel_list.back().outputs.insert(current_op->d_output_tensors[0]);
-        }
+//         //First fuse the multiple d_outputs:
+//         if (current_op->d_output_tensors.size()>1)
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Add_MultiGredient, current_op);
+//             for (int j = 0; j < current_op->d_output_tensors.size(); j++)
+//             {
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[j]);
+//             }
+//             kernel_list.back().outputs.insert(current_op->d_output_tensors[0]);
+//         }
 
-        //Go
+//         //Go
         
-        if (current_op->type=="GatherV2")
-        {
-            kernel_list.emplace_back(CUDAKernelType::GatherV2_Backward, current_op);
-            Tensor* d_input = nullptr;
-            Tensor* d_weight = nullptr;
-            Tensor* input = nullptr;
-            Tensor* weight = nullptr;
+//         if (current_op->type=="GatherV2")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::GatherV2_Backward, current_op);
+//             Tensor* d_input = nullptr;
+//             Tensor* d_weight = nullptr;
+//             Tensor* input = nullptr;
+//             Tensor* weight = nullptr;
 
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    d_weight = current_op->input_tensors[j].d_tensor;
-                    weight = current_op->input_tensors[j].tensor;
-                }
-                else
-                {
-                    input = current_op->input_tensors[j].tensor;
-                    if (current_op->input_tensors[j].d_tensor)
-                    {
-                        d_input = current_op->input_tensors[j].d_tensor;
-                    }
-                }
-            }
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     d_weight = current_op->input_tensors[j].d_tensor;
+//                     weight = current_op->input_tensors[j].tensor;
+//                 }
+//                 else
+//                 {
+//                     input = current_op->input_tensors[j].tensor;
+//                     if (current_op->input_tensors[j].d_tensor)
+//                     {
+//                         d_input = current_op->input_tensors[j].d_tensor;
+//                     }
+//                 }
+//             }
 
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(input);
-            kernel_list.back().outputs.insert(d_weight);
-            if (d_input)
-            {
-                kernel_list.back().outputs.insert(d_input);
-            }
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(input);
+//             kernel_list.back().outputs.insert(d_weight);
+//             if (d_input)
+//             {
+//                 kernel_list.back().outputs.insert(d_input);
+//             }
 
-            kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-            kernel_list.back().inputs.insert(d_weight);
-            kernel_list.back().inputs.insert(weight);
-            kernel_list.back().outputs.insert(weight);
+//             kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//             kernel_list.back().inputs.insert(d_weight);
+//             kernel_list.back().inputs.insert(weight);
+//             kernel_list.back().outputs.insert(weight);
 
     
-        }
-        else if (current_op->type=="Dot")
-        {
-            Tensor* d_input = nullptr;
-            Tensor* d_weight = nullptr;
-            Tensor* input = nullptr;
-            Tensor* weight = nullptr;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    d_weight = current_op->input_tensors[j].d_tensor;
-                    weight = current_op->input_tensors[j].tensor;
-                }
-                else
-                {
-                    input = current_op->input_tensors[j].tensor;
-                    d_input = current_op->input_tensors[j].d_tensor;
-                }
-            }
+//         }
+//         else if (current_op->type=="Dot")
+//         {
+//             Tensor* d_input = nullptr;
+//             Tensor* d_weight = nullptr;
+//             Tensor* input = nullptr;
+//             Tensor* weight = nullptr;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     d_weight = current_op->input_tensors[j].d_tensor;
+//                     weight = current_op->input_tensors[j].tensor;
+//                 }
+//                 else
+//                 {
+//                     input = current_op->input_tensors[j].tensor;
+//                     d_input = current_op->input_tensors[j].d_tensor;
+//                 }
+//             }
 
 
-            kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Weight, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(input);
-            kernel_list.back().outputs.insert(d_weight);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Weight, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(input);
+//             kernel_list.back().outputs.insert(d_weight);
 
-            if (d_input)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Input, current_op);
-                kernel_list.back().inputs.insert(weight);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().outputs.insert(d_input);
+//             if (d_input)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Linear_Backward_Input, current_op);
+//                 kernel_list.back().inputs.insert(weight);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().outputs.insert(d_input);
 
-            }
+//             }
             
-            kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Weight, current_op);
-            kernel_list.back().inputs.insert(d_weight);
-            kernel_list.back().inputs.insert(weight);
-            kernel_list.back().outputs.insert(weight);
+//             kernel_list.emplace_back(CUDAKernelType::Linear_Apply_Grad_Weight, current_op);
+//             kernel_list.back().inputs.insert(d_weight);
+//             kernel_list.back().inputs.insert(weight);
+//             kernel_list.back().outputs.insert(weight);
 
-        }
-        else if (current_op->type=="Convolution")
-        {
-            Tensor* d_input = nullptr;
-            Tensor* d_weight = nullptr;
-            Tensor* input = nullptr;
-            Tensor* weight = nullptr;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    d_weight = current_op->input_tensors[j].d_tensor;
-                    weight = current_op->input_tensors[j].tensor;
-                }
-                else
-                {
-                    input = current_op->input_tensors[j].tensor;
-                    if (current_op->input_tensors[j].d_tensor)
-                    {
-                        d_input = current_op->input_tensors[j].d_tensor;
-                    }
-                }
-            }
+//         }
+//         else if (current_op->type=="Convolution")
+//         {
+//             Tensor* d_input = nullptr;
+//             Tensor* d_weight = nullptr;
+//             Tensor* input = nullptr;
+//             Tensor* weight = nullptr;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     d_weight = current_op->input_tensors[j].d_tensor;
+//                     weight = current_op->input_tensors[j].tensor;
+//                 }
+//                 else
+//                 {
+//                     input = current_op->input_tensors[j].tensor;
+//                     if (current_op->input_tensors[j].d_tensor)
+//                     {
+//                         d_input = current_op->input_tensors[j].d_tensor;
+//                     }
+//                 }
+//             }
 
-            kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Weight, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(input);
-            kernel_list.back().outputs.insert(d_weight);
+//             kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Weight, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(input);
+//             kernel_list.back().outputs.insert(d_weight);
 
-            if(d_input){
-                kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Input, current_op);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().inputs.insert(weight);
-                kernel_list.back().outputs.insert(d_input);
-            }
+//             if(d_input){
+//                 kernel_list.emplace_back(CUDAKernelType::Conv2d_Backward_Input, current_op);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().inputs.insert(weight);
+//                 kernel_list.back().outputs.insert(d_input);
+//             }
 
-            kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-            kernel_list.back().inputs.insert(d_weight);
-            kernel_list.back().inputs.insert(weight);
-            kernel_list.back().outputs.insert(weight);
-        }
+//             kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//             kernel_list.back().inputs.insert(d_weight);
+//             kernel_list.back().inputs.insert(weight);
+//             kernel_list.back().outputs.insert(weight);
+//         }
         
-        else if (current_op->type=="Relu")
-        {
-            kernel_list.emplace_back(CUDAKernelType::ReLU_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="Add")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Add_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            int global_id = -1;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].d_tensor)
-                {
-                    kernel_list.back().outputs.insert(current_op->input_tensors[j].d_tensor);
-                }
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    global_id = j;
-                }
-            }
-            if (global_id!=-1)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
-            }
+//         else if (current_op->type=="Relu")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::ReLU_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="Add")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Add_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             int global_id = -1;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].d_tensor)
+//                 {
+//                     kernel_list.back().outputs.insert(current_op->input_tensors[j].d_tensor);
+//                 }
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     global_id = j;
+//                 }
+//             }
+//             if (global_id!=-1)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
+//             }
         
-        }
-        else if (current_op->type=="BatchMatMul")
-        {
-            if (current_op->input_tensors[0].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Backward, current_op);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-            }
-            if (current_op->input_tensors[1].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Backward, current_op);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);                
-                kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
-            }
+//         }
+//         else if (current_op->type=="BatchMatMul")
+//         {
+//             if (current_op->input_tensors[0].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Backward, current_op);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//             }
+//             if (current_op->input_tensors[1].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::BatchMatMul_Backward, current_op);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);                
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
+//             }
 
-            int global_id = -1;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    global_id = j;
-                }
-            }
-            if (global_id!=-1)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
-            }
-        }
-        else if (current_op->type=="Divide")
-        {
-            if (current_op->input_tensors[0].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Divide_Backward_A, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-            }
-            if (current_op->input_tensors[1].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Divide_Backward_B, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
-                kernel_list.back().inputs.insert(current_op->output_tensor);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
-            }
+//             int global_id = -1;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     global_id = j;
+//                 }
+//             }
+//             if (global_id!=-1)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
+//             }
+//         }
+//         else if (current_op->type=="Divide")
+//         {
+//             if (current_op->input_tensors[0].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Divide_Backward_A, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//             }
+//             if (current_op->input_tensors[1].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Divide_Backward_B, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
+//                 kernel_list.back().inputs.insert(current_op->output_tensor);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
+//             }
 
-            int global_id = -1;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    global_id = j;
-                }
-            }
-            if (global_id!=-1)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
-            }
-        }
-        else if (current_op->type=="Multiply")
-        {
-            if (current_op->input_tensors[0].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Multiply_Backward, current_op);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-            }
-            if (current_op->input_tensors[1].d_tensor)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Multiply_Backward, current_op);
-                kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-                kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);                
-                kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
-            }
+//             int global_id = -1;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     global_id = j;
+//                 }
+//             }
+//             if (global_id!=-1)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
+//             }
+//         }
+//         else if (current_op->type=="Multiply")
+//         {
+//             if (current_op->input_tensors[0].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Multiply_Backward, current_op);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//             }
+//             if (current_op->input_tensors[1].d_tensor)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Multiply_Backward, current_op);
+//                 kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);                
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[1].d_tensor);
+//             }
 
-            int global_id = -1;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    global_id = j;
-                }
-            }
-            if (global_id!=-1)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
-            }
-        }
-        else if (current_op->type=="Power")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Power_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
-            Assert(current_op->input_tensors[0].d_tensor);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="SoftmaxBasic")
-        {
-            kernel_list.emplace_back(CUDAKernelType::SoftmaxBasic_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="Sqrt")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Sqrt_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="Subtract")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Subtract_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            int global_id = -1;
-            for (int j = 0; j < current_op->input_num; j++)
-            {
-                if (current_op->input_tensors[j].d_tensor)
-                {
-                    kernel_list.back().outputs.insert(current_op->input_tensors[j].d_tensor);
-                }
-                if (current_op->input_tensors[j].tensor->is_global_weight)
-                {
-                    global_id = j;
-                }
-            }
-            if (global_id!=-1)
-            {
-                kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
-                kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
-                kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
-            }
-        }
-        else if (current_op->type=="Sum")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Sum_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="Tanh")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Tanh_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else if (current_op->type=="Erf")
-        {
-            kernel_list.emplace_back(CUDAKernelType::Erf_Backward, current_op);
-            kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
-            kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
-            kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
-        }
-        else{
-            exit(1);
-        }
+//             int global_id = -1;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     global_id = j;
+//                 }
+//             }
+//             if (global_id!=-1)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
+//             }
+//         }
+//         else if (current_op->type=="Power")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Power_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[1].tensor);
+//             assert(current_op->input_tensors[0].d_tensor);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="SoftmaxBasic")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::SoftmaxBasic_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="Sqrt")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Sqrt_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="Subtract")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Subtract_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             int global_id = -1;
+//             for (int j = 0; j < current_op->input_num; j++)
+//             {
+//                 if (current_op->input_tensors[j].d_tensor)
+//                 {
+//                     kernel_list.back().outputs.insert(current_op->input_tensors[j].d_tensor);
+//                 }
+//                 if (current_op->input_tensors[j].tensor->is_global_weight)
+//                 {
+//                     global_id = j;
+//                 }
+//             }
+//             if (global_id!=-1)
+//             {
+//                 kernel_list.emplace_back(CUDAKernelType::Apply_Grad, current_op);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].tensor);
+//                 kernel_list.back().inputs.insert(current_op->input_tensors[global_id].d_tensor);
+//                 kernel_list.back().outputs.insert(current_op->input_tensors[global_id].tensor);
+//             }
+//         }
+//         else if (current_op->type=="Sum")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Sum_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="Tanh")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Tanh_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else if (current_op->type=="Erf")
+//         {
+//             kernel_list.emplace_back(CUDAKernelType::Erf_Backward, current_op);
+//             kernel_list.back().inputs.insert(current_op->d_output_tensors[0]);
+//             kernel_list.back().inputs.insert(current_op->input_tensors[0].tensor);
+//             kernel_list.back().outputs.insert(current_op->input_tensors[0].d_tensor);
+//         }
+//         else{
+//             exit(1);
+//         }
         
-    }
-}
+//     }
+// }
 
 
 
@@ -1875,7 +1056,7 @@ void tensor_second_pass_interval_formation(){
                     }
                     
                 }
-                Assert(!a_interval_started);
+                assert(!a_interval_started);
             }
         }
         else
@@ -1988,7 +1169,7 @@ void tensor_second_pass_interval_formation(){
                     }
                 }
                 
-            Assert(!a_interval_started);
+            assert(!a_interval_started);
         }
     }
 }
@@ -2042,12 +1223,12 @@ void get_interval_time(){
         
         if (!interval_list[i]->is_looped)
         {
-            Assert(interval_list[i]->kernelLevel_interval[1] > interval_list[i]->kernelLevel_interval[0]);
+            assert(interval_list[i]->kernelLevel_interval[1] > interval_list[i]->kernelLevel_interval[0]);
             interval_list[i]->time_estimated = kernel_time_table[interval_list[i]->kernelLevel_interval[1]] - kernel_time_table[interval_list[i]->kernelLevel_interval[0]];
         }
         else
         {
-            Assert(interval_list[i]->kernelLevel_interval[1] < interval_list[i]->kernelLevel_interval[0]);
+            assert(interval_list[i]->kernelLevel_interval[1] < interval_list[i]->kernelLevel_interval[0]);
             int end = interval_list[i]->kernelLevel_interval[1];
             int start = interval_list[i]->kernelLevel_interval[0];
             end += kernel_num;
@@ -2138,7 +1319,7 @@ void give_eviction_guide(){
                         for (int j = curr_tensor->hidding_intervals[interval_index]->kernelLevel_interval[0]; j < curr_tensor->hidding_intervals[interval_index]->kernelLevel_interval[1]; j++){
 
                             double delta_time = kernel_time_table[curr_tensor->hidding_intervals[interval_index]->kernelLevel_interval[1]] - kernel_time_table[j+1];
-                            Assert(delta_time >= 0);
+                            assert(delta_time >= 0);
                             if (delta_time > medium_hot_line)
                             {
                                 EvictionGuide_Table[j].entry[curr_tensor] = Eviction_P::Hot;
@@ -2194,7 +1375,7 @@ void give_eviction_guide(){
                     {
                         
                         double delta_time = kernel_time_table[curr_tensor->hidding_intervals[j]->kernelLevel_interval[1]] - kernel_time_table[current_kernel_index+1];
-                        Assert(delta_time >= 0);
+                        assert(delta_time >= 0);
                         if (delta_time > medium_hot_line)
                         {
                             EvictionGuide_Table[current_kernel_index].entry[curr_tensor] = Eviction_P::Hot;
@@ -2220,7 +1401,7 @@ void give_eviction_guide(){
                     {
                         
                         double delta_time = kernel_time_table[kernel_num] - kernel_time_table[current_kernel_index+1] + kernel_time_table[curr_tensor->hidding_intervals[j]->kernelLevel_interval[1]] - kernel_time_table[0];
-                        Assert(delta_time >= 0);
+                        assert(delta_time >= 0);
                         if (delta_time > medium_hot_line)
                         {
                             EvictionGuide_Table[current_kernel_index].entry[curr_tensor] = Eviction_P::Hot;
@@ -2243,7 +1424,7 @@ void give_eviction_guide(){
                     {
                         
                         double delta_time = kernel_time_table[curr_tensor->hidding_intervals[j]->kernelLevel_interval[1]] - kernel_time_table[current_kernel_index+1];
-                        Assert(delta_time >= 0);
+                        assert(delta_time >= 0);
                         if (delta_time > medium_hot_line)
                         {
                             EvictionGuide_Table[current_kernel_index].entry[curr_tensor] = Eviction_P::Hot;
@@ -2371,7 +1552,7 @@ vector<kernel_BW_buffer> gpu2pcie_BW_estimation;
 int gpu2ssd_BWcheck(long tensor_size, int offload_index, int ideal_finish_index){
     long rest_size = tensor_size;
     bool traffic_ok = false;
-    Assert(offload_index<=ideal_finish_index);
+    assert(offload_index<=ideal_finish_index);
     for (int i = offload_index; i < ideal_finish_index; i++)
     {
         if (!gpu2ssd_BW_estimation[i].full)
@@ -2748,10 +1929,10 @@ int scheduling_offload_flashneuron(){
         }
     }
 
-    if (borden == 184 && is_transformer == 1 && kernel_list[0].parent_op->N==1024)
-    {
-        GPU_line = (long)(GPU_line*0.993); //For supporting VIT-1024, if don't do so it's possible the original FlashNeuron algorithm will crash
-    }
+    // if (borden == 184 && is_transformer == 1 && kernel_list[0].parent_op->N==1024)
+    // {
+    //     GPU_line = (long)(GPU_line*0.993); //For supporting VIT-1024, if don't do so it's possible the original FlashNeuron algorithm will crash
+    // }
     
 
     GPU_line = GPU_line - global_tensor_size - max_num_pages*PAGE_SIZE;
@@ -2772,7 +1953,7 @@ int scheduling_offload_flashneuron(){
             break;
         }
     }
-    Assert(make_error_index!=-1);
+    assert(make_error_index!=-1);
 
     long total_offloadable_size = 0;
     vector<Tensor*> offloadable_tensors;
@@ -2785,8 +1966,8 @@ int scheduling_offload_flashneuron(){
         {
             if (!tensor_j->is_global_weight && tensor_j->live_interval[1]!=-1 && tensor_j->live_interval[1] > make_error_index)
             {
-                Assert(tensor_j!=current_kernel->workspace);
-                // Assert(tensor_j!=current_kernel->parent_layer->weight);
+                assert(tensor_j!=current_kernel->workspace);
+                // assert(tensor_j!=current_kernel->parent_layer->weight);
                 bool find = false;
                 for (int l = 0; l < offloadable_tensors.size(); l++)
                 {
@@ -2813,7 +1994,7 @@ int scheduling_offload_flashneuron(){
     {
         std::cout<<".";
         Tensor* curr_tensor = *itr;
-        Assert(!curr_tensor->is_global_weight);
+        assert(!curr_tensor->is_global_weight);
         int proper_cold_start_index = -1;
         if (curr_tensor->hidding_intervals.size()==0)
         {
@@ -2832,7 +2013,7 @@ int scheduling_offload_flashneuron(){
                 break;
             }
         }
-        Assert(proper_cold_start_index!=-1);
+        assert(proper_cold_start_index!=-1);
         Offload_Hint_FlashNeuron offload(proper_cold_start_index, curr_tensor);
         offload_hints_fn.push_back(offload);
         curr_tensor->f_is_choosed_to_offload = true;
@@ -3022,7 +2203,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                //Assert(finish_index >= 0);
+                //assert(finish_index >= 0);
                 if (finish_index == -1)
                 {
                     finish_index = kernel_index;
@@ -3070,9 +2251,9 @@ void scheduling_prefetch(){
             }
             k_index--;
         }
-        Assert(pressure_region[0] >= 0);
-        Assert(pressure_region[1] >= 0);
-        Assert(pressure_region[1] >= pressure_region[0]);
+        assert(pressure_region[0] >= 0);
+        assert(pressure_region[1] >= 0);
+        assert(pressure_region[1] >= pressure_region[0]);
     }
 
 
@@ -3172,7 +2353,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                //Assert(finish_index >= 0);
+                //assert(finish_index >= 0);
                 if (finish_index == -1)
                 {
                     finish_index = kernel_index;
@@ -3375,7 +2556,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                Assert(eviction_clear_index >= 0);
+                assert(eviction_clear_index >= 0);
 
 
                 //NEW: Use PCIe estimation to get the finishing index
@@ -3394,7 +2575,7 @@ void scheduling_prefetch(){
                 //         break;
                 //     }
                 // }
-                // Assert(prefetch_start_index>=0);
+                // assert(prefetch_start_index>=0);
 
                 int pcie_prefetch_index = -1;
 
@@ -3404,10 +2585,10 @@ void scheduling_prefetch(){
                 {
                     //Calculate cpu-prefetch-index
                     pcie_prefetch_index = pcie2gpu_BWgiveIndx(curr_interval->the_tensor->size_in_byte*1.0, curr_interval->kernelLevel_interval[1]);
-                    Assert(pcie_prefetch_index >=0);
+                    assert(pcie_prefetch_index >=0);
                     // Get cpu eviction finish index
                     pcie_eviction_clear_index = gpu2pcie_BWgiveIndx(curr_interval->the_tensor->size_in_byte, curr_interval->kernelLevel_interval[0]);
-                    Assert(pcie_eviction_clear_index >=0);
+                    assert(pcie_eviction_clear_index >=0);
 
                     if(pcie_prefetch_index > pcie_eviction_clear_index){
                         //First schedule the pre-eviction
@@ -3436,10 +2617,10 @@ void scheduling_prefetch(){
                 {
                     //Calculate ssd-prefetch-index
                     pcie_prefetch_index = ssd2gpu_BWgiveIndx(curr_interval->the_tensor->size_in_byte*1.0, curr_interval->kernelLevel_interval[1]);
-                    Assert(pcie_prefetch_index >=0);
+                    assert(pcie_prefetch_index >=0);
                     // Get cpu eviction finish index
                     pcie_eviction_clear_index = gpu2ssd_BWgiveIndx(curr_interval->the_tensor->size_in_byte, curr_interval->kernelLevel_interval[0]);
-                    Assert(pcie_eviction_clear_index >=0);
+                    assert(pcie_eviction_clear_index >=0);
 
                     if(pcie_prefetch_index > pcie_eviction_clear_index){
                         //First schedule the pre-eviction
@@ -3464,7 +2645,7 @@ void scheduling_prefetch(){
                 }
                 
                 //minus mem
-                Assert(pcie_eviction_clear_index>=0);
+                assert(pcie_eviction_clear_index>=0);
                 for (int j = pcie_eviction_clear_index + 1; j < pcie_prefetch_index; j++)
                 {
                     GPU_resident_memory_estimation[j] -= curr_interval->the_tensor->size_in_byte;
@@ -3484,7 +2665,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                Assert(eviction_clear_index >= 0);
+                assert(eviction_clear_index >= 0);
 
 
                 //Second schedule the prefetch
@@ -3498,7 +2679,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                Assert(prefetch_start_index>=0);
+                assert(prefetch_start_index>=0);
 
                 if (prefetch_start_index!=curr_interval->kernelLevel_interval[0])
                 {
@@ -3547,12 +2728,12 @@ void scheduling_prefetch(){
                 //         break;
                 //     }
                 // }
-                // Assert(eviction_clear_index >= 0);
+                // assert(eviction_clear_index >= 0);
 
                 //NEW: Use PCIe estimation to get the finishing index
                 int pcie_eviction_clear_index = -1;
                 pcie_eviction_clear_index = gpu2pcie_BWgiveIndx(curr_interval->the_tensor->size_in_byte, curr_interval->kernelLevel_interval[0]);
-                Assert(pcie_eviction_clear_index>=0);
+                assert(pcie_eviction_clear_index>=0);
 
 
                 //Second schedule the prefetch
@@ -3566,11 +2747,11 @@ void scheduling_prefetch(){
                 //         break;
                 //     }
                 // }
-                // Assert(prefetch_start_index>=0);
+                // assert(prefetch_start_index>=0);
 
                 int pcie_prefetch_index = -1;
                 pcie_prefetch_index = pcie2gpu_BWgiveIndx(curr_interval->the_tensor->size_in_byte*1.0, curr_interval->kernelLevel_interval[1]);
-                Assert(pcie_prefetch_index >=0);
+                assert(pcie_prefetch_index >=0);
 
 
                 if (pcie_prefetch_index > pcie_eviction_clear_index)
@@ -3592,7 +2773,7 @@ void scheduling_prefetch(){
                 }
 
                 //minus mem
-                Assert(pcie_eviction_clear_index>=0);
+                assert(pcie_eviction_clear_index>=0);
                 for (int j = pcie_eviction_clear_index + 1; j < pcie_prefetch_index; j++)
                 {
                     GPU_resident_memory_estimation[j] -= curr_interval->the_tensor->size_in_byte;
@@ -3614,7 +2795,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                Assert(eviction_clear_index >= 0);
+                assert(eviction_clear_index >= 0);
 
 
                 //Second schedule the prefetch
@@ -3628,7 +2809,7 @@ void scheduling_prefetch(){
                         break;
                     }
                 }
-                Assert(prefetch_start_index>=0);
+                assert(prefetch_start_index>=0);
 
                 if (prefetch_start_index!=curr_interval->kernelLevel_interval[0])
                 {
@@ -3738,7 +2919,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(eviction_clear_index >= 0);
+                    assert(eviction_clear_index >= 0);
 
 
                     //Second schedule the prefetch
@@ -3752,7 +2933,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(prefetch_start_index>=0);
+                    assert(prefetch_start_index>=0);
 
 
                     //Third schedule the un-pin
@@ -3766,7 +2947,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(un_pin_index>=0);
+                    assert(un_pin_index>=0);
 
 
 
@@ -3803,7 +2984,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(eviction_clear_index >= 0);
+                    assert(eviction_clear_index >= 0);
 
 
                     //Second schedule the prefetch
@@ -3817,7 +2998,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(prefetch_start_index>=0);
+                    assert(prefetch_start_index>=0);
 
 
                     //Third schedule the un-pin
@@ -3831,7 +3012,7 @@ void scheduling_prefetch(){
                             break;
                         }
                     }
-                    Assert(un_pin_index>=0);
+                    assert(un_pin_index>=0);
 
                     if (prefetch_start_index!=curr_interval->kernelLevel_interval[0])
                     {
@@ -4203,9 +3384,9 @@ void FlashNeuron_memory_manager::dealloc_tensor(Tensor* tensor){
         return;
     }
     
-    Assert(tensor->f_is_allocated_on_GPU);
+    assert(tensor->f_is_allocated_on_GPU);
     tensor->f_is_allocated_on_GPU = false;
-    Assert(tensor->f_page_range[1] > tensor->f_page_range[0]);
+    assert(tensor->f_page_range[1] > tensor->f_page_range[0]);
     for (long i = tensor->f_page_range[0]; i < tensor->f_page_range[1]; i++)
     {
         page_table[i].valid = false;
@@ -4231,11 +3412,11 @@ FlashNeuron_simulator::FlashNeuron_simulator(double BW_ssd_GBs, double BW_pcie_G
 
 // return 0 for success, return 1 for failure, return 2 for kernel finished
 int FlashNeuron_simulator::serve_one_pending_event(int kernel_event_id){
-    Assert(!fl_pending_event_queue.empty());
-    Assert(this->total_sim_time <= fl_pending_event_queue.top().ready_time);
+    assert(!fl_pending_event_queue.empty());
+    assert(this->total_sim_time <= fl_pending_event_queue.top().ready_time);
     if (fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Kernel_Finish)
     {
-        Assert(fl_pending_event_queue.top().event_id==kernel_event_id);
+        assert(fl_pending_event_queue.top().event_id==kernel_event_id);
         if (!fl_fetch_queue.empty() || !fl_offload_queue.empty() || !fl_fetch_queue_cpu.empty() || !fl_offload_queue_cpu.empty())
         {
             this->total_trasfer_time += fl_pending_event_queue.top().ready_time - this->total_sim_time;
@@ -4246,8 +3427,8 @@ int FlashNeuron_simulator::serve_one_pending_event(int kernel_event_id){
     }
     else if (fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Offload_Finish)
     {
-        Assert(fl_pending_event_queue.top().event_id==fl_offload_queue.front().event_id);
-        Assert(fl_offload_queue.front().is_happening);
+        assert(fl_pending_event_queue.top().event_id==fl_offload_queue.front().event_id);
+        assert(fl_offload_queue.front().is_happening);
         this->total_trasfer_time += fl_pending_event_queue.top().ready_time - this->total_sim_time;
         this->total_sim_time = fl_pending_event_queue.top().ready_time;
         fl_pending_event_queue.pop();
@@ -4268,8 +3449,8 @@ int FlashNeuron_simulator::serve_one_pending_event(int kernel_event_id){
     }
     else if (fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Offload_Finish_CPU)
     {
-        Assert(fl_pending_event_queue.top().event_id==fl_offload_queue_cpu.front().event_id);
-        Assert(fl_offload_queue_cpu.front().is_happening);
+        assert(fl_pending_event_queue.top().event_id==fl_offload_queue_cpu.front().event_id);
+        assert(fl_offload_queue_cpu.front().is_happening);
         this->total_trasfer_time += fl_pending_event_queue.top().ready_time - this->total_sim_time;
         this->total_sim_time = fl_pending_event_queue.top().ready_time;
         fl_pending_event_queue.pop();
@@ -4292,16 +3473,16 @@ int FlashNeuron_simulator::serve_one_pending_event(int kernel_event_id){
     }
     else if (fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Prefetch_Finish_CPU)
     {
-        Assert(fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Prefetch_Finish_CPU);
-        Assert(fl_pending_event_queue.top().event_id==fl_fetch_queue_cpu.front().event_id);
-        Assert(fl_fetch_queue_cpu.front().is_happening);
+        assert(fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Prefetch_Finish_CPU);
+        assert(fl_pending_event_queue.top().event_id==fl_fetch_queue_cpu.front().event_id);
+        assert(fl_fetch_queue_cpu.front().is_happening);
         this->total_trasfer_time += fl_pending_event_queue.top().ready_time - this->total_sim_time;
         this->total_sim_time = fl_pending_event_queue.top().ready_time;
         fl_pending_event_queue.pop();
 
         std::cout<<"Time: "<<this->total_sim_time<<", Tensor: "<<fl_fetch_queue_cpu.front().tensor->name()<<" finished prefetching!"<<std::endl;
         fl_fetch_queue_cpu.front().tensor->f_is_fetching = false;
-        Assert(cpu_tensors.find(fl_fetch_queue_cpu.front().tensor)!=cpu_tensors.end());
+        assert(cpu_tensors.find(fl_fetch_queue_cpu.front().tensor)!=cpu_tensors.end());
         cpu_tensors.erase(fl_fetch_queue_cpu.front().tensor);
         fl_fetch_queue_cpu.pop();
         if (!fl_fetch_queue_cpu.empty())
@@ -4318,9 +3499,9 @@ int FlashNeuron_simulator::serve_one_pending_event(int kernel_event_id){
     }
     else  //Prefetch
     {
-        Assert(fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Prefetch_Finish);
-        Assert(fl_pending_event_queue.top().event_id==fl_fetch_queue.front().event_id);
-        Assert(fl_fetch_queue.front().is_happening);
+        assert(fl_pending_event_queue.top().type==Fl_Pending_Event_Type::Prefetch_Finish);
+        assert(fl_pending_event_queue.top().event_id==fl_fetch_queue.front().event_id);
+        assert(fl_fetch_queue.front().is_happening);
         this->total_trasfer_time += fl_pending_event_queue.top().ready_time - this->total_sim_time;
         this->total_sim_time = fl_pending_event_queue.top().ready_time;
         fl_pending_event_queue.pop();
@@ -4356,7 +3537,7 @@ void FlashNeuron_simulator::check_fetch_allocation(){
     {
         //schedule prefetch:
         int alloo = mem_manager.alloc_from_right(fetch_allocate_waiting_queue.front().tensor);
-        Assert(alloo==0);
+        assert(alloo==0);
 
         fl_fetch pre_fetch;
         if (cpu_tensors.find(fetch_allocate_waiting_queue.front().tensor)!=cpu_tensors.end())
@@ -4443,7 +3624,7 @@ void FlashNeuron_simulator::run(){
             if (tensor_list[i]->is_global_weight)
             {
                 int allo = mem_manager.alloc_from_left(tensor_list[i]);
-                Assert(allo==0);
+                assert(allo==0);
             }
         }
         std::cout<<"Done!"<<std::endl;
@@ -4467,7 +3648,7 @@ void FlashNeuron_simulator::run(){
         if (largest_wp_tensor)
         {
             int allo = mem_manager.alloc_from_left(largest_wp_tensor);
-            Assert(allo==0);
+            assert(allo==0);
         }
     }
     else
@@ -4480,12 +3661,12 @@ void FlashNeuron_simulator::run(){
             if (tensor_list[i]->is_global_weight && !tensor_list[i]->is_choosed_to_evict)
             {
                 int allo = mem_manager.alloc_from_left(tensor_list[i]);
-                Assert(allo==0);
+                assert(allo==0);
             }
             else if (tensor_list[i]->is_global_weight)
             {
                 int allo = mem_manager.alloc_from_right(tensor_list[i]);
-                Assert(allo==0);
+                assert(allo==0);
             }
             
         }
@@ -4521,7 +3702,7 @@ void FlashNeuron_simulator::run(){
             {
                 while (offload_list_index < offload_hints_fn.size())
                 {
-                    Assert(offload_hints_fn[offload_list_index].issued_time>=i);
+                    assert(offload_hints_fn[offload_list_index].issued_time>=i);
                     if (offload_hints_fn[offload_list_index].issued_time==i)
                     {
 
@@ -4560,7 +3741,7 @@ void FlashNeuron_simulator::run(){
                 while (!fl_offload_queue.empty())
                 {
                     int serve = this->serve_one_pending_event(0);
-                    Assert(serve!=2 && serve!=1);
+                    assert(serve!=2 && serve!=1);
                 }
             }
         }
@@ -4569,7 +3750,7 @@ void FlashNeuron_simulator::run(){
         { // It's GDS mode for G10
             while (movement_list_index < movement_hints.size())
             {
-                Assert(movement_hints[movement_list_index].issued_time >= i);
+                assert(movement_hints[movement_list_index].issued_time >= i);
                 if (movement_hints[movement_list_index].issued_time==i)
                 {
                     if (movement_hints[movement_list_index].to == PageLocation::IN_SSD) 
@@ -4673,7 +3854,7 @@ void FlashNeuron_simulator::run(){
                                 while (!fl_pending_event_queue.empty())
                                 {
                                     int serve = this->serve_one_pending_event(0);
-                                    Assert(serve!=2);
+                                    assert(serve!=2);
                                     int alloc_try = mem_manager.alloc_from_right(tttensor);
                                     if (alloc_try==0)
                                     {
@@ -4713,13 +3894,13 @@ void FlashNeuron_simulator::run(){
                                     while (!fl_pending_event_queue.empty())
                                     {
                                         int serve = this->serve_one_pending_event(0);
-                                        Assert(serve!=2);
+                                        assert(serve!=2);
                                         if (tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU)
                                         {
                                             break;
                                         }
                                     }
-                                    Assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
+                                    assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
                                     
                                 }
                                 
@@ -4753,13 +3934,13 @@ void FlashNeuron_simulator::run(){
                                     while (!fl_pending_event_queue.empty())
                                     {
                                         int serve = this->serve_one_pending_event(0);
-                                        Assert(serve!=2);
+                                        assert(serve!=2);
                                         if (tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU)
                                         {
                                             break;
                                         }
                                     }
-                                    Assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
+                                    assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
                                     
                                 }
                             }
@@ -4773,7 +3954,7 @@ void FlashNeuron_simulator::run(){
                                 while (!fl_pending_event_queue.empty())
                                 {
                                     int serve = this->serve_one_pending_event(0);
-                                    Assert(serve!=2);
+                                    assert(serve!=2);
                                     int alloc_try = mem_manager.alloc_from_left(tttensor);
                                     if (alloc_try==0)
                                     {
@@ -4794,13 +3975,13 @@ void FlashNeuron_simulator::run(){
                         while (!fl_pending_event_queue.empty())
                         {
                             int serve = this->serve_one_pending_event(0);
-                            Assert(serve!=2);
+                            assert(serve!=2);
                             if (tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU)
                             {
                                 break;
                             }
                         }
-                        Assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
+                        assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
                     }
                 }
             }
@@ -4816,14 +3997,14 @@ void FlashNeuron_simulator::run(){
                         while (!fl_pending_event_queue.empty())
                         {
                             int serve = this->serve_one_pending_event(0);
-                            Assert(serve!=2);
+                            assert(serve!=2);
                             check_fetch_allocation();
                             if (tttensor->f_is_allocated_on_GPU)
                             {
                                 break;
                             }
                         }
-                        Assert(fetch_allocate_waiting_tensors.find(tttensor)==fetch_allocate_waiting_tensors.end());
+                        assert(fetch_allocate_waiting_tensors.find(tttensor)==fetch_allocate_waiting_tensors.end());
                     }
                     else if (tttensor->is_choosed_to_evict)
                     {
@@ -4838,7 +4019,7 @@ void FlashNeuron_simulator::run(){
                             while (!fl_pending_event_queue.empty())
                             {
                                 int serve = this->serve_one_pending_event(0);
-                                Assert(serve!=2);
+                                assert(serve!=2);
                                 int alloc_try = mem_manager.alloc_from_right(tttensor);
                                 if (alloc_try==0)
                                 {
@@ -4880,13 +4061,13 @@ void FlashNeuron_simulator::run(){
                                 {
                                     int serve = this->serve_one_pending_event(0);
                                     check_fetch_allocation();
-                                    Assert(serve!=2);
+                                    assert(serve!=2);
                                     if (tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU)
                                     {
                                         break;
                                     }
                                 }
-                                Assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
+                                assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
                                 
                             }
                             
@@ -4921,13 +4102,13 @@ void FlashNeuron_simulator::run(){
                                 {
                                     int serve = this->serve_one_pending_event(0);
                                     check_fetch_allocation();
-                                    Assert(serve!=2);
+                                    assert(serve!=2);
                                     if (tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU)
                                     {
                                         break;
                                     }
                                 }
-                                Assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
+                                assert(tttensor->f_is_fetching==false && tttensor->f_is_allocated_on_GPU);
                                 
                             }
                         }
@@ -4941,7 +4122,7 @@ void FlashNeuron_simulator::run(){
                             while (!fl_pending_event_queue.empty())
                             {
                                 int serve = this->serve_one_pending_event(0);
-                                Assert(serve!=2);
+                                assert(serve!=2);
                                 int alloc_try = mem_manager.alloc_from_left(tttensor);
                                 if (alloc_try==0)
                                 {
@@ -4964,13 +4145,13 @@ void FlashNeuron_simulator::run(){
                     {
                         int serve = this->serve_one_pending_event(0);
                         check_fetch_allocation();
-                        Assert(serve!=2);
+                        assert(serve!=2);
                         if (tttensor->f_is_fetching==false)
                         {
                             break;
                         }
                     }
-                    Assert(tttensor->f_is_fetching==false);
+                    assert(tttensor->f_is_fetching==false);
                 }
                 // else if (tttensor->f_is_allocated_on_GPU){
                 //     bool is_offloading = false;
@@ -4987,7 +4168,7 @@ void FlashNeuron_simulator::run(){
                 //         {
                 //             int serve = this->serve_one_pending_event(0);
                 //             check_fetch_allocation();
-                //             Assert(serve!=2);
+                //             assert(serve!=2);
                 //             bool is_offloading = false;
                 //             for (auto it : fl_offload_queue)
                 //             {
@@ -5009,7 +4190,7 @@ void FlashNeuron_simulator::run(){
                 //                 is_offloading = true;
                 //             }
                 //         }
-                //         Assert(!is_offloading);
+                //         assert(!is_offloading);
                 //     }
                 //     bool is_offloading_cpu = false;
                 //     for (auto it : fl_offload_queue_cpu)
@@ -5025,7 +4206,7 @@ void FlashNeuron_simulator::run(){
                 //         {
                 //             int serve = this->serve_one_pending_event(0);
                 //             check_fetch_allocation();
-                //             Assert(serve!=2);
+                //             assert(serve!=2);
                 //             bool is_offloading_cpu = false;
                 //             for (auto it : fl_offload_queue_cpu)
                 //             {
@@ -5047,7 +4228,7 @@ void FlashNeuron_simulator::run(){
                 //                 is_offloading_cpu = true;
                 //             }
                 //         }
-                //         Assert(!is_offloading_cpu);
+                //         assert(!is_offloading_cpu);
                 //     }
                 // }
             }
@@ -5126,7 +4307,7 @@ void FlashNeuron_simulator::run(){
                             {
                                 //schedule prefetch:
                                 int alloo = mem_manager.alloc_from_right(tttensor);
-                                Assert(alloo==0);
+                                assert(alloo==0);
 
                                 fl_fetch pre_fetch;
                                 pre_fetch.estimated_time = tttensor->size_in_byte / (SSD_PCIe_bandwidth_GBps * 1024 * 1024 * 1024 / 1000);

@@ -542,9 +542,6 @@ class Stat {
                      int pf_cpu,
                      int pf_ssd,
                      int pf_unalloc);
-    void addTransferBoundary(int current_iter,
-                             unsigned long start_time,
-                             bool is_begin);
     void addSizeInfo(long raw, long aligned);
     void printSizeInfo();
 
@@ -555,7 +552,6 @@ class Stat {
     void analyzeKernelStat();
     void analyzePCIeStat();
     void analyzeEvcStat();
-    void analyzeTransferBoundaryStat();
 
     int getAllNumersInLine(const string& input, vector<string>& output) const;
     string output_file_basename;

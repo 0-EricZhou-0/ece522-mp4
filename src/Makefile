@@ -14,18 +14,16 @@ PRODUCTS = $(COMPILER)
 default: $(PRODUCTS)
 
 # Set up the list of source and object files
-SRCS = ast.cc analysis.cc errors.cc utility.cc libyywrap.cc codegen.cc simulationComponents.cc simulationEvents.cc simulator.cc main.cc
+SRCS = analysis.cc simulationComponents.cc simulationEvents.cc simulator.cc main.cc
 
 # OBJS can deal with either .cc or .c files listed in SRCS
-OBJS = y.tab.o lex.yy.o $(patsubst %.cc, %.o, $(filter %.cc,$(SRCS))) $(patsubst %.c, %.o, $(filter %.c, $(SRCS)))
+OBJS = $(patsubst %.cc,%.o,$(filter %.cc,$(SRCS))) $(patsubst %.c,%.o,$(filter %.c, $(SRCS)))
 
-JUNK =  $(OBJS) lex.yy.c dpp.yy.c y.tab.c y.tab.h *.core core $(COMPILER).purify purify.log 
+JUNK = $(OBJS)
 
 # Define the tools we are going to use
 CC= g++
 LD = g++
-LEX = flex
-YACC = bison
 
 # Set up the necessary flags for the tools
 
@@ -45,15 +43,9 @@ LEXFLAGS = -d
 YACCFLAGS = -dvty
 
 # Link with standard c library, math library, and lex library
-LIBS = -lc -lm -ll
+LIBS = -lc
 
 # Rules for various parts of the target
-
-.yy.o: $*.yy.c
-	$(CC) $(CFLAGS) -c -o $@ $*.cc
-
-lex.yy.c: scanner.l parser.y y.tab.h
-	$(LEX) $(LEXFLAGS) scanner.l
 
 .cc.o: $*.cc
 	$(CC) $(CFLAGS) -c -o $@ $*.cc
@@ -63,12 +55,6 @@ lex.yy.c: scanner.l parser.y y.tab.h
 
 %.o: %.cc
 	$(CC) $(CFLAGS) -c -o $@ $*.cc
-
-y.tab.h y.tab.c: parser.y
-	$(YACC) $(YACCFLAGS) parser.y
-
-cex: y.tab.h y.tab.c
-	$(YACC) -Wcex parser.y
 
 # rules to build compiler (dcc)
 
@@ -95,14 +81,10 @@ depend:
 	$(CC) -MM $(SRCS) $(PREP_SRCS) >> Makefile
 
 clean:
-	rm -f $(JUNK) y.output $(PRODUCTS)
+	rm -f $(JUNK) $(PRODUCTS)
 
 # DO NOT DELETE
 
-ast.o: ast.cc ast.h location.h list.h utility.h
+ast.o: ast.cc ast.h
 analysis.o: analysis.cc analysis.h
-errors.o: errors.cc errors.h location.h
-utility.o: utility.cc utility.h list.h
-main.o: main.cc utility.h errors.h location.h scanner.h
-dppmain.o: dppmain.cc scanner.h
-codegen.o: codegen.cc codegen.h
+main.o: main.cc

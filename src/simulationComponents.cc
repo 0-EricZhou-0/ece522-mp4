@@ -63,7 +63,7 @@ extern int num_iteration;
 
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
-extern vector<Model_Layer*> forward_layers;
+
 extern vector<DataMovementHint> movement_hints;
 extern vector<EvictionGuide_Entry> EvictionGuide_Table;
 
@@ -88,7 +88,7 @@ CPUPageTable::CPUPageTable(int expected_size, int memory_line) {
 }
 
 CPUPageTable::CPUPageTableEntry *CPUPageTable::createEntry(Addr vpn) {
-  Assert(!exist(vpn));
+  assert(!exist(vpn));
   page_table[vpn] = CPUPageTable::CPUPageTableEntry();
   page_table[vpn].in_transfer = false;
   page_table[vpn].location = PageLocation::NOT_PRESENT;
@@ -106,11 +106,11 @@ bool CPUPageTable::exist(Addr vpn) {
 }
 
 void CPUPageTable::allocPTE(Addr vpn) {
-  Assert(page_table.find(vpn) != page_table.end());
+  assert(page_table.find(vpn) != page_table.end());
   if (phys_page_avail.size() == 0) {
     phys_page_avail.insert(total_memory_pages * PAGE_SIZE);
     total_memory_pages++;
-    Assert(total_memory_pages <= memory_line_pages);
+    assert(total_memory_pages <= memory_line_pages);
   }
   Addr ppn = *phys_page_avail.begin();
   phys_page_avail.erase(ppn);
@@ -121,13 +121,13 @@ void CPUPageTable::allocPTE(Addr vpn) {
 }
 
 void CPUPageTable::markInTransferPTE(Addr vpn) {
-  Assert(page_table.find(vpn) != page_table.end());
+  assert(page_table.find(vpn) != page_table.end());
   CPUPageTableEntry &entry = page_table[vpn];
   entry.in_transfer = true;
 }
 
 void CPUPageTable::markArrivedPTE(Addr vpn) {
-  Assert(page_table.find(vpn) != page_table.end());
+  assert(page_table.find(vpn) != page_table.end());
   CPUPageTableEntry &entry = page_table[vpn];
   entry.in_transfer = false;
 }
@@ -146,7 +146,7 @@ void CPUPageTable::AddInTransferPages(vector<Tensor *> &required_tensors) {
 }
 
 void CPUPageTable::AddInTransferPages(Addr start_addr) {
-  Assert(sim_sys->tensorIsRequired(sim_sys->GPU_PT.searchTensorForPage(start_addr)));
+  assert(sim_sys->tensorIsRequired(sim_sys->GPU_PT.searchTensorForPage(start_addr)));
   in_transfer_pages.insert(start_addr);
 }
 
@@ -168,10 +168,10 @@ size_t CPUPageTable::numInTransferPages() {
 }
 
 void CPUPageTable::erasePTE(Addr vpn) {
-  Assert(page_table.find(vpn) != page_table.end());
+  assert(page_table.find(vpn) != page_table.end());
   CPUPageTableEntry &entry = page_table[vpn];
-  Assert(phys_page_avail.find(entry.ppn) == phys_page_avail.end());
-  Assert(entry.location == PageLocation::IN_CPU);
+  assert(phys_page_avail.find(entry.ppn) == phys_page_avail.end());
+  assert(entry.location == PageLocation::IN_CPU);
   entry.location = PageLocation::NOT_PRESENT;
   entry.in_transfer = false;
   phys_page_avail.insert(entry.ppn);
@@ -182,7 +182,7 @@ pair<size_t, size_t> CPUPageTable::getCapacity() {
 }
 
 bool CPUPageTable::reachMemoryLine() {
-  Assert(total_memory_pages <= memory_line_pages);
+  assert(total_memory_pages <= memory_line_pages);
   return total_memory_pages - phys_page_avail.size() == memory_line_pages;
 }
 
@@ -203,7 +203,7 @@ GPUPageTable::GPUPageTable(unsigned long total_memory_pages, EvcPolicy policy, i
   }
   // initialize eviction guide specific data structures
   for (Tensor *tensor : tensor_list) {
-    Assert(range_remap.find(tensor->getGlobalOffset()) == range_remap.end());
+    assert(range_remap.find(tensor->getGlobalOffset()) == range_remap.end());
     range_remap[tensor->getGlobalOffset()] = tensor;
   }
 }
@@ -229,13 +229,13 @@ bool GPUPageTable::allocPTE(Addr vpn) {
   GPUPageTableEntry &entry = page_table[vpn];
   entry.ppn = ppn;
   entry.alloced_no_arrival = true;
-  Assert(phys_page_avail.size() + page_table.size() == total_memory_pages);
+  assert(phys_page_avail.size() + page_table.size() == total_memory_pages);
   LRUAccess(vpn);
   return true;
 }
 
 void GPUPageTable::markArrivedPTE(Addr vpn) {
-  Assert(page_table.find(vpn) != page_table.end());
+  assert(page_table.find(vpn) != page_table.end());
   GPUPageTableEntry &entry = page_table[vpn];
   entry.alloced_no_arrival = false;
 }
@@ -243,11 +243,11 @@ void GPUPageTable::markArrivedPTE(Addr vpn) {
 void GPUPageTable::erasePTE(Addr vpn) {
   if (page_table.find(vpn) == page_table.end())
     return;
-  Assert(page_table[vpn].alloced_no_arrival == false);
+  assert(page_table[vpn].alloced_no_arrival == false);
   Addr ppn = page_table[vpn].ppn;
   page_table.erase(vpn);
   phys_page_avail.insert(ppn);
-  Assert(phys_page_avail.size() + page_table.size() == total_memory_pages);
+  assert(phys_page_avail.size() + page_table.size() == total_memory_pages);
   LRURemove(vpn);
 }
 
@@ -288,7 +288,7 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
     case EvcPolicy::LRU: {
       sim_sys->LRUSuggestInitialLRUBase();
       auto lru_it = sim_sys->getSuggestedLRUBase();
-      Assert(lru_it != lru_addrs.end());
+      assert(lru_it != lru_addrs.end());
 
       EvictCandidate &ret_candidate = get<3>(evicted_entry);
       ret_candidate.vpn = *lru_it;
@@ -370,7 +370,7 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
         while (lru_it != lru_addrs.end() && sim_sys->CPU_PT.getEntry(*lru_it)->in_transfer) {
           lru_it++;
         }
-        Assert(lru_it != lru_addrs.end());
+        assert(lru_it != lru_addrs.end());
         if (lru_it == lru_base_it) {
           sim_sys->storeSuggestedLRUBase(++lru_base_it);
         }
@@ -386,7 +386,7 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       if (page_table.find(ret_candidate.vpn) == page_table.end()) {
         eprintf("VPN: %ld Tid: %d is_pf: %d\n",
             ret_candidate.vpn, ret_candidate.tensor->tensor_id, is_pf);
-        Assert(false);
+        assert(false);
       }
       get<1>(evicted_entry) = page_table.at(ret_candidate.vpn);
       if (ret_candidate.tensor->is_alive(kernel_id))
@@ -396,10 +396,10 @@ tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCa
       break;
     }
     default:
-      Assert(false);
+      assert(false);
   }
   // sanity check
-  Assert(page_table.find(get<0>(evicted_entry)) != page_table.end());
+  assert(page_table.find(get<0>(evicted_entry)) != page_table.end());
   return evicted_entry;
 }
 
@@ -414,9 +414,9 @@ void GPUPageTable::report() {
 
 Tensor *GPUPageTable::searchTensorForPage(Addr vpn) {
   map<Addr, Tensor *>::iterator it = range_remap.upper_bound(vpn);
-  Assert(it != range_remap.begin());
+  assert(it != range_remap.begin());
   Tensor *tensor = (--it)->second;
-  Assert(vpn >= tensor->getGlobalOffset() &&
+  assert(vpn >= tensor->getGlobalOffset() &&
          vpn < tensor->getGlobalOffset() + tensor->size_in_byte);
   return tensor;
 }
@@ -429,7 +429,7 @@ void GPUPageTable::LRUPin(Addr addr) {
   lru_addrs.push_front(addr);
   lru_table[addr] = lru_addrs.begin();
   // sanity check
-  Assert(lru_table.size() == page_table.size());
+  assert(lru_table.size() == page_table.size());
 }
 
 // TODO: change this
@@ -440,11 +440,11 @@ void GPUPageTable::LRUUnpin(Addr addr) {
   lru_addrs.push_back(addr);
   lru_table[addr] = --lru_addrs.end();
   // sanity check
-  Assert(lru_table.size() == page_table.size());
+  assert(lru_table.size() == page_table.size());
 }
 
 void GPUPageTable::LRUAccess(Addr addr) {
-  Assert(addr < memory_offset_intermediate + memory_offset_weights);
+  assert(addr < memory_offset_intermediate + memory_offset_weights);
   auto lru_item = lru_table.find(addr);
   bool change_suggestion = false;
   if (lru_item != lru_table.end()) {
@@ -457,14 +457,14 @@ void GPUPageTable::LRUAccess(Addr addr) {
   if (change_suggestion)
     sim_sys->storeSuggestedLRUBase(lru_addrs.begin());
   // sanity check
-  Assert(page_table.find(addr) != page_table.end());
-  Assert(lru_table.size() == page_table.size());
+  assert(page_table.find(addr) != page_table.end());
+  assert(lru_table.size() == page_table.size());
 }
 
 void GPUPageTable::LRURemove(Addr addr) {
   auto lru_item = lru_table.find(addr);
   bool change_suggestion = false;
-  Assert(lru_item != lru_table.end());
+  assert(lru_item != lru_table.end());
   if (lru_item->second == sim_sys->getSuggestedLRUBase())
     change_suggestion = true;
   lru_addrs.erase(lru_item->second);
@@ -472,17 +472,17 @@ void GPUPageTable::LRURemove(Addr addr) {
   if (change_suggestion)
     sim_sys->storeSuggestedLRUBase(lru_addrs.begin());
   // sanity check
-  Assert(page_table.find(addr) == page_table.end());
-  Assert(lru_table.size() == page_table.size());
+  assert(page_table.find(addr) == page_table.end());
+  assert(lru_table.size() == page_table.size());
 }
 
 Addr GPUPageTable::LRUGetLeastUsed() {
-  Assert(lru_addrs.size() >= 1);
+  assert(lru_addrs.size() >= 1);
   return lru_addrs.front();
 }
 
 size_t GPUPageTable::LRUGetLeastUsed(vector<Addr>& lrus, size_t size) {
-  Assert(lru_addrs.size() >= 1);
+  assert(lru_addrs.size() >= 1);
   size_t actural_size = lru_addrs.size() > size ? size : lru_addrs.size();
   lrus.clear();
   auto it = lru_addrs.begin();
@@ -605,8 +605,7 @@ System::System() :
   printf("  PCIe Batch II Cycle:        %-10d\n", PCIe_batch_ii_cycle);
   printf("  PCIe Batch Size Page:       %-10d\n", PCIe_batch_size_in_page);
   printf("  PCIe Alloc Batch Size:      %-10d\n", alloc_batch_num);
-  printf("Simulation Setting END\n");
-  printf("\n");
+  printf("======== Simulation Setting END ========\n");
 
   current_kernel_iterator = kernel_list.begin();
   reschedule_info = nullptr;
@@ -794,7 +793,7 @@ void Stat::addPCIeBWStat(int current_iter,
   if (incoming_pg_num == 0 && outgoing_pg_num == 0)
     return;
 
-  Assert(incoming_pg_SSD + incoming_pg_CPU == incoming_pg_num &&
+  assert(incoming_pg_SSD + incoming_pg_CPU == incoming_pg_num &&
          outgoing_pg_SSD + outgoing_pg_CPU == outgoing_pg_num);
 
 
@@ -831,14 +830,6 @@ void Stat::addPFTensor(int current_iter,
       pf_cpu << "," << pf_ssd << "," << pf_unalloc << ")\n";
 }
 
-
-void Stat::addTransferBoundary(int current_iter,
-                               unsigned long start_time,
-                               bool is_begin) {
-  ofstream& fout = get<1>(output_files.at(TransferBoundaryStat));
-  fout << current_iter << "[" << start_time << "]" << is_begin << "\n";
-}
-
 void Stat::addLRUTableStat(int current_iter,
                            const CUDAKernel *kernel,
                            string &LRU_table_report) {
@@ -856,10 +847,10 @@ void Stat::prepareOutputFiles(bool final_only) {
     string filename = get<0>(pair->second);
     ofstream& fout = get<1>(pair->second);
     fout.open(filename, ofstream::out | ofstream::trunc);
-    Assert(fout.good());
+    assert(fout.good());
     fout.close();
     fout.open(filename, ofstream::app);
-    Assert(fout.good());
+    assert(fout.good());
   }
 }
 
@@ -890,8 +881,6 @@ bool Stat::outputFileExists() {
 void Stat::analyzeStat() {
   analyzeKernelStat();
   analyzePCIeStat();
-  //analyzeEvcStat();
-  analyzeTransferBoundaryStat();
 }
 
 void Stat::analyzeKernelStat() {
@@ -899,8 +888,8 @@ void Stat::analyzeKernelStat() {
   ofstream& fout = get<1>(output_files[FinalStat]);
   int curit = 0, line_no = 0;
   string line;
-  Assert(fin.good());
-  Assert(fout.good());
+  assert(fin.good());
+  assert(fout.good());
 
   vector<string> stats;
   long curit_in_transfer = 0, curit_cpu_pf = 0, curit_ssd_pf = 0, curit_unalloc_pf = 0;
@@ -916,7 +905,7 @@ void Stat::analyzeKernelStat() {
     if (num != 1 && num != 9 && num != 12) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
           line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
-      Assert(false);
+      assert(false);
     }
 
     int iter = stod(stats[0]);
@@ -990,8 +979,8 @@ void Stat::analyzePCIeStat() {
   ofstream& fout = get<1>(output_files[FinalStat]);
   int curit = 0, line_no = 0;
   string line;
-  Assert(fin.good());
-  Assert(fout.good());
+  assert(fin.good());
+  assert(fout.good());
 
   vector<string> stats;
   long curit_alloc = 0, total_alloc = 0;
@@ -1008,7 +997,7 @@ void Stat::analyzePCIeStat() {
     if (num != 1 && num != 9) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
           line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
-      Assert(false);
+      assert(false);
     }
 
     int iter = stod(stats[0]);
@@ -1070,8 +1059,8 @@ void Stat::analyzeEvcStat() {
   int curit = 0, line_no = 0;
   long timestamp, current_timestamp = -1;
   string line;
-  Assert(fin.good());
-  Assert(fout.good());
+  assert(fin.good());
+  assert(fout.good());
 
   vector<string> stats;
   map<Eviction_P, long> curit_hotness, total_hotness;
@@ -1082,7 +1071,7 @@ void Stat::analyzeEvcStat() {
     if (num != 1 && num != 7) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
           line.c_str(), get<0>(output_files[EvcStat]).c_str(), line_no);
-      Assert(false);
+      assert(false);
     }
 
     int iter = stoi(stats[0]);
@@ -1130,180 +1119,6 @@ void Stat::analyzeEvcStat() {
     Eviction_P hotness = static_cast<Eviction_P>(stoi(stats[6]));
     curit_hotness[hotness]++;
   }
-}
-
-void Stat::analyzeTransferBoundaryStat() {
-  ifstream kernel_fin(get<0>(output_files[KernelStat]));
-  ifstream boundary_fin(get<0>(output_files[TransferBoundaryStat]));
-  ofstream& breakdown_fout = get<1>(output_files[KernelTimeBreakdownStat]);
-  ofstream& final_fout = get<1>(output_files[FinalStat]);
-  int curit = 0, line_no = 0;
-  long timestamp, current_timestamp = -1;
-  string line;
-  Assert(kernel_fin.good());
-  Assert(boundary_fin.good());
-  Assert(breakdown_fout.good());
-  Assert(final_fout.good());
-
-  vector<string> stats;
-  long last_ending_time = 0;
-  int total_kernel_num = 0;
-  vector<pair<long, long>> kernel_times;
-  vector<long> ideal_kernel_times;
-  vector<pair<long, long>> transfer_times;
-  while (getline(kernel_fin, line)) {
-    int num = getAllNumersInLine(line, stats);
-    line_no++;
-    if (num != 1 && num != 12) {
-      eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
-      Assert(false);
-    }
-    if (num == 1) break;
-    long iter = stol(stats[0]);
-    long kid = stol(stats[1]);
-    long s_time = stol(stats[2]);
-    long e_time = stol(stats[3]);
-    long ideal_time = stol(stats[4]);
-    kernel_times.push_back(make_pair(last_ending_time, e_time));
-    if (iter == 0) {
-      total_kernel_num = kid + 1;
-      ideal_kernel_times.push_back(ideal_time);
-    }
-    last_ending_time = e_time;
-  }
-
-  long last_boundary_time = 0;
-  bool last_status = false;
-  while (getline(boundary_fin, line)) {
-    int num = getAllNumersInLine(line, stats);
-    line_no++;
-    if (num != 1 && num != 3) {
-      eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
-      Assert(false);
-    }
-    if (num == 1) {
-      if (last_status)
-        transfer_times.push_back(make_pair(last_boundary_time, last_ending_time));
-      break;
-    }
-    long cur_time = stol(stats[1]);
-    bool start = stoi(stats[2]) != 0;
-    if (!last_status) {
-      Assert(start);
-      last_boundary_time = cur_time;
-    } else {
-      Assert(!start);
-      transfer_times.push_back(make_pair(last_boundary_time, cur_time));
-    }
-    last_status = !last_status;
-  }
-  // TODO: total iter number is hardcoded now, change me
-  long iter_stall_times[2] = {0, 0};
-  long iter_compute_times[2] = {0, 0};
-  long iter_overlap_times[2] = {0, 0};
-
-  int transfer_time_idx = 0;
-  int kernel_time_idx = 0;
-  long current_kernel_transfer_time = 0;
-  while (transfer_time_idx < transfer_times.size() &&
-         kernel_time_idx < kernel_times.size()) {
-    pair<long, long> transfer_time = transfer_times[transfer_time_idx];
-    pair<long, long> kernel_time = kernel_times[kernel_time_idx];
-    // test intersection
-    if (kernel_time.first < transfer_time.second && transfer_time.first < kernel_time.second) {
-      pair<long, long> intersection = make_pair(
-        std::max(kernel_time.first, transfer_time.first),
-        std::min(kernel_time.second, transfer_time.second)
-      );
-      current_kernel_transfer_time += intersection.second - intersection.first;
-      if (kernel_time.second < transfer_time.second) {
-        int iter_idx = kernel_time_idx / total_kernel_num;
-        int kernel_idx = kernel_time_idx % total_kernel_num;
-
-        long total_time = kernel_time.second - kernel_time.first;
-        long ideal_time = ideal_kernel_times[kernel_idx];
-
-        long compute_time = total_time - current_kernel_transfer_time;
-        long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
-        long stall_time = total_time - ideal_time;
-        if (overlap_time < 0) {
-          stall_time -= overlap_time;
-          overlap_time = 0;
-        }
-        iter_compute_times[iter_idx] += compute_time;
-        iter_overlap_times[iter_idx] += overlap_time;
-        iter_stall_times[iter_idx] += stall_time;
-        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
-            compute_time << "+" << overlap_time << "+" << stall_time << "\n";
-        current_kernel_transfer_time = 0;
-        kernel_time_idx++;
-      } else {
-        transfer_time_idx++;
-      }
-    } else {
-      if (kernel_time.first < transfer_time.first) {
-        int iter_idx = kernel_time_idx / total_kernel_num;
-        int kernel_idx = kernel_time_idx % total_kernel_num;
-
-        long total_time = kernel_time.second - kernel_time.first;
-        long ideal_time = ideal_kernel_times[kernel_idx];
-
-        long compute_time = total_time - current_kernel_transfer_time;
-        long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
-        long stall_time = total_time - ideal_time;
-        if (overlap_time < 0) {
-          stall_time -= overlap_time;
-          overlap_time = 0;
-        }
-        iter_compute_times[iter_idx] += compute_time;
-        iter_overlap_times[iter_idx] += overlap_time;
-        iter_stall_times[iter_idx] += stall_time;
-        breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
-            compute_time << "+" << overlap_time << "+" << stall_time << "\n";
-        current_kernel_transfer_time = 0;
-        kernel_time_idx++;
-      } else {
-        transfer_time_idx++;
-      }
-    }
-  }
-  while (kernel_time_idx < kernel_times.size()) {
-    pair<long, long> kernel_time = kernel_times[kernel_time_idx];
-
-    int iter_idx = kernel_time_idx / total_kernel_num;
-    int kernel_idx = kernel_time_idx % total_kernel_num;
-
-    long total_time = kernel_time.second - kernel_time.first;
-    long ideal_time = ideal_kernel_times[kernel_idx];
-
-    long compute_time = total_time - current_kernel_transfer_time;
-    long overlap_time = current_kernel_transfer_time + ideal_time - total_time;
-    long stall_time = total_time - ideal_time;
-    if (overlap_time < 0) {
-      stall_time -= overlap_time;
-      overlap_time = 0;
-    }
-    iter_compute_times[iter_idx] += compute_time;
-    iter_overlap_times[iter_idx] += overlap_time;
-    iter_stall_times[iter_idx] += stall_time;
-    breakdown_fout << iter_idx << "+" << kernel_idx << ":" << total_time << "=" <<
-        compute_time << "+" << overlap_time << "+" << stall_time << "\n";
-    current_kernel_transfer_time = 0;
-    kernel_time_idx++;
-  }
-  std::ostringstream out_str;
-  for (int iter = 0; iter < 2; iter++) {
-    out_str << "total_time_breakdown_stall.iter" << iter << " = " <<
-        iter_stall_times[iter] << "\n";
-    out_str << "total_time_breakdown_overlap.iter" << iter << " = " <<
-        iter_overlap_times[iter] << "\n";
-    out_str << "total_time_breakdown_executiuonOnly.iter" << iter << " = " <<
-        iter_compute_times[iter] << "\n";
-  }
-  printf("%s", out_str.str().c_str());
-  final_fout << out_str.str();
 }
 
 int Stat::getAllNumersInLine(const string& input, vector<string>& output) const {

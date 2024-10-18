@@ -18,7 +18,6 @@ using Simulator::PageLocation;
 
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
-extern vector<Model_Layer*> forward_layers;
 extern vector<DataMovementHint> movement_hints;
 
 extern string output_folder_name;
@@ -52,7 +51,7 @@ bool KernelBeginEvent::requiredPageArrived(vector<Tensor *> &required_tensors, b
     CPUPageTable::CPUPageTableEntry *entry;
     for (long page_num = 0; page_num < total_pages; page_num++) {
       entry = sim_sys->CPU_PT.getEntry(start_addr + PAGE_SIZE * page_num);
-      Assert(entry);
+      assert(entry);
       if (overtime) {
         if (entry->in_transfer || entry->location != IN_GPU)
           return false;
@@ -69,7 +68,7 @@ bool KernelBeginEvent::requiredPageArrived(vector<Tensor *> &required_tensors, b
           } else if (entry->location == IN_GPU) {
             in_migration_out_pages++;
           } else {
-            Assert(false);
+            assert(false);
           }
         } else {
           if (entry->location == IN_CPU) {
@@ -81,7 +80,7 @@ bool KernelBeginEvent::requiredPageArrived(vector<Tensor *> &required_tensors, b
           } else if (entry->location == IN_GPU) {
             total_in_place_pages++;
           } else {
-            Assert(false);
+            assert(false);
           }
         }
       }
@@ -131,7 +130,7 @@ PageFaultInfo KernelBeginEvent::transferTensorToGPU(Tensor *tensor, bool is_inpu
     Addr page_starting_addr = start_addr + PAGE_SIZE * page_num;
     CPUPageTable::CPUPageTableEntry *CPU_PTE =
         sim_sys->CPU_PT.getEntry(page_starting_addr);
-    Assert(CPU_PTE);
+    assert(CPU_PTE);
     if (CPU_PTE->in_transfer) {
       info.in_transfer_pages++;
       continue;
@@ -153,7 +152,7 @@ PageFaultInfo KernelBeginEvent::transferTensorToGPU(Tensor *tensor, bool is_inpu
     } else if (CPU_PTE->location == IN_GPU) {
       continue;
     } else {
-      Assert(false);
+      assert(false);
     }
     sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
   }
@@ -171,19 +170,19 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
     Addr page_starting_addr = start_addr + PAGE_SIZE * page_num;
     CPUPageTable::CPUPageTableEntry *CPU_PTE =
         sim_sys->CPU_PT.getEntry(page_starting_addr);
-    Assert(CPU_PTE);
+    assert(CPU_PTE);
     if (CPU_PTE->in_transfer)
       continue;
 
     if (hint->from == PageLocation::IN_GPU_LEAST) {
-      Assert(hint->to == PageLocation::IN_GPU);
+      assert(hint->to == PageLocation::IN_GPU);
       if (sim_sys->GPU_PT.exist(page_starting_addr)) {
         // Unpin
         sim_sys->GPU_PT.LRUUnpin(page_starting_addr);
       }
       hint->human_readable_hint = "Unpin";
     } else if (hint->to == PageLocation::IN_GPU_LEAST) {
-      Assert(hint->from == PageLocation::IN_GPU);
+      assert(hint->from == PageLocation::IN_GPU);
       if (sim_sys->GPU_PT.exist(page_starting_addr)) {
         // Pin
         sim_sys->GPU_PT.LRUPin(page_starting_addr);
@@ -229,7 +228,7 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
       }
       CPU_PTE->location = PageLocation::NOT_PRESENT;
       hint->human_readable_hint = "Predealloc";
-      Assert(!sim_sys->GPU_PT.exist(page_starting_addr));
+      assert(!sim_sys->GPU_PT.exist(page_starting_addr));
     } else {
       hint->human_readable_hint = "Ignored";
     }
@@ -285,7 +284,7 @@ unsigned long KernelBeginEvent::getPageFaultTime(PageFaultInfo &info) {
 bool KernelBeginEvent::shouldExecute() {
   if (kernel != sim_sys->getCurrentKernel())
     sim_sys->advanceCurrentKernel();
-  Assert(kernel == sim_sys->getCurrentKernel());
+  assert(kernel == sim_sys->getCurrentKernel());
   return sim_sys->getCurrentIteration() < sim_sys->getMaxIteration();
 }
 
@@ -326,7 +325,7 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
     if (current_hints.size() != 0)
       iprintf("  Guide report\n", "");
     for (DataMovementHint hint : current_hints) {
-      Assert(hint.issued_time % kernel_list.size() == sim_sys->getCurrentKernel()->kernel_id);
+      assert(hint.issued_time % kernel_list.size() == sim_sys->getCurrentKernel()->kernel_id);
       guidedTransfer(&hint);
       printf("   ⊢%13s ", hint.tensor->name().c_str());
       if (hint.tensor->is_global_weight) printf("[  Global   ] ");
@@ -390,8 +389,8 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
           page_fault_info.not_presented_input_pages + page_fault_info.not_presented_output_pages,
           page_fault_info.in_transfer_pages);
     }
-    Assert(sim_sys->reschedule_info);
-    Assert(!sim_sys->reschedule_info->kernel_started);
+    assert(sim_sys->reschedule_info);
+    assert(!sim_sys->reschedule_info->kernel_started);
     sim_sys->reschedule_info->PF_info.push_back(page_fault_info);
     // page faults time brought by eviction is ignored
   } else {
@@ -402,7 +401,7 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
       // rescheduled
       to_schedule_time = sim_sys->reschedule_info->first_scheduled_time +
                          sim_sys->reschedule_info->page_faulted_time;
-      Assert(sim_sys->reschedule_info->kernel_started);
+      assert(sim_sys->reschedule_info->kernel_started);
 
       if (to_schedule_time < scheduled_time) {
         wprintf("  Page fault time < rescheduling time\n", "");
@@ -436,7 +435,7 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
       /////////////////////////////////////////////////////////////////////////////////
     }
     // scheduled new kernel start event
-    Assert(!sim_sys->reschedule_info);
+    assert(!sim_sys->reschedule_info);
     created_events.push_back(
         new KernelBeginEvent(to_schedule_time, sim_sys->getNextKernel()));
     sim_sys->CPU_PT.RemoveAllInTransferPages();
@@ -480,10 +479,10 @@ void performance_model(double t_00, double t_10, double t_11, double r_input, do
                        double r_input_ssd, double r_output_ssd, long s_input, long s_output,
                        double BW_pcie, double BW_ssd, int l_sys, int l_ssd,
                        double& deltaT_PF, double& BW_ssd_rest, double& BW_pcie_rest) {
-    Assert(r_input >= 0 && r_input <= 1);
-    Assert(r_output >=0 && r_output <= 1);
-    Assert(r_input_ssd >= 0 && r_input_ssd <= 1);
-    Assert(r_output_ssd >= 0 && r_output_ssd <= 1);
+    assert(r_input >= 0 && r_input <= 1);
+    assert(r_output >=0 && r_output <= 1);
+    assert(r_input_ssd >= 0 && r_input_ssd <= 1);
+    assert(r_output_ssd >= 0 && r_output_ssd <= 1);
 
     double BW_cpu_in;
     double BW_cpu_out;
@@ -550,13 +549,13 @@ pair<int, int> BatcherEvent::processFetch(Addr start_addr, PageLocation src, boo
   // continue to alloc it in GPU
   pair<int, int> alloc_info = processAlloc(start_addr, is_pf);
   if (alloc_info.first < 0) {
-    Assert(!is_pf);
+    assert(!is_pf);
     return alloc_info;
   }
   // record and afterprocess everything
   recordFetch(src, alloc_info.first);
   CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-  Assert(CPU_PTE);
+  assert(CPU_PTE);
   // PCIe transfer instant
   sim_sys->GPU_PT.markArrivedPTE(start_addr);
   sim_sys->CPU_PT.markArrivedPTE(start_addr);
@@ -567,7 +566,7 @@ pair<int, int> BatcherEvent::processFetch(Addr start_addr, PageLocation src, boo
 pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
   // <allocate_pg_num, outgoing_pg_num>
   CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-  Assert(CPU_PTE);
+  assert(CPU_PTE);
   // mark allocation for the page in GPU PT and determine possible eviction
   pair<int, int> alloc_info = make_pair(1, 0);
   if (sim_sys->GPU_PT.allocPTE(start_addr)) {
@@ -594,20 +593,20 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     // DEEPUM specific handling
     if (candidate_tensor == nullptr) {
       // cannot find a target tensor, stalling prefetch
-      Assert(!is_pf);
+      assert(!is_pf);
       alloc_info.first = -1;
       alloc_info.second = -1;
       return alloc_info;
     }
-    Assert(!sim_sys->CPU_PT.getEntry(vpn)->in_transfer);
+    assert(!sim_sys->CPU_PT.getEntry(vpn)->in_transfer);
     // destination override
     if (destination != PageLocation::NOT_PRESENT && forced_evc_dest != PageLocation::NOT_KNOWN)
       destination = forced_evc_dest;
     alloc_info.second = processEvict(vpn, destination, true);
     // sanity check
-    Assert(candidate_tensor);
+    assert(candidate_tensor);
     bool living = candidate_tensor->is_alive(sim_sys->getCurrentKernel()->kernel_id);
-    Assert(!(living && destination == NOT_PRESENT));
+    assert(!(living && destination == NOT_PRESENT));
     // remove the page in CPU and reset force eviction destination if necessary
     if (CPU_PTE->location == PageLocation::IN_CPU) {
       sim_sys->CPU_PT.erasePTE(start_addr);
@@ -615,7 +614,7 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
         forced_evc_dest = PageLocation::NOT_KNOWN;
     }
     // alloc new page in GPU PT
-    Assert(sim_sys->GPU_PT.allocPTE(start_addr));
+    assert(sim_sys->GPU_PT.allocPTE(start_addr));
     sim_sys->GPU_PT.markArrivedPTE(start_addr);
     sim_sys->CPU_PT.markArrivedPTE(start_addr);
 
@@ -626,19 +625,19 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     //                           std::get<3>(evict_entry));
   }
   GPUPageTable::GPUPageTableEntry *GPU_PTE = sim_sys->GPU_PT.getEntry(start_addr);
-  Assert(GPU_PTE);
+  assert(GPU_PTE);
   // mark allocation for the page in CPU PT
   CPU_PTE->location = IN_GPU;
   CPU_PTE->ppn = GPU_PTE->ppn;
   sim_sys->CPU_PT.RemoveInTransferPage(start_addr);
-  Assert(!CPU_PTE->in_transfer && !GPU_PTE->alloced_no_arrival);
+  assert(!CPU_PTE->in_transfer && !GPU_PTE->alloced_no_arrival);
   return alloc_info;
 }
 
 size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf) {
   CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-  Assert(CPU_PTE);
-  Assert(is_pf || CPU_PTE->in_transfer);
+  assert(CPU_PTE);
+  assert(is_pf || CPU_PTE->in_transfer);
 
   size_t evc_count = 0;
   Tensor *tensor = sim_sys->GPU_PT.searchTensorForPage(start_addr);
@@ -655,13 +654,13 @@ size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf
           sim_sys->getCurrentKernel()->kernel_id, tensor->tensor_id,
           start_addr, print_pagelocation_array[dest].c_str(),
           tensor->live_interval[0], tensor->live_interval[1]);
-      Assert(false);
+      assert(false);
     }
   }
 
   if (dest == IN_CPU) {
     sim_sys->CPU_PT.allocPTE(start_addr);
-    Assert(CPU_PTE->location == IN_CPU);
+    assert(CPU_PTE->location == IN_CPU);
     evc_count = 1;
   } else if (dest == IN_SSD) {
     CPU_PTE->location = IN_SSD;
@@ -670,7 +669,7 @@ size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf
     CPU_PTE->location = NOT_PRESENT;
     evc_count = 0;
   } else {
-    Assert(false);
+    assert(false);
   }
   recordEvict(dest, evc_count);
   // re-enter PF queue if required by current kernel
@@ -683,7 +682,7 @@ size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf
     } else if (dest == NOT_PRESENT) {
       sim_sys->pf_alloc_queue.push_back(start_addr);
     } else {
-      Assert(false);
+      assert(false);
     }
     sim_sys->CPU_PT.markInTransferPTE(start_addr);
     sim_sys->CPU_PT.AddInTransferPages(start_addr);
@@ -700,7 +699,7 @@ void BatcherEvent::processPreevict() {
          outgoing_pg_num < sim_sys->GPU_PCIe_batch_num &&
          sim_sys->preevict_SSD_queue.size()) {
       Addr start_addr = sim_sys->preevict_SSD_queue.front();
-      Assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
+      assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
              (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == PageLocation::IN_SSD));
       PageLocation destination = forced_evc_dest == PageLocation::NOT_KNOWN ? PageLocation::IN_SSD : forced_evc_dest;
       size_t out = processEvict(start_addr, destination, false);
@@ -711,7 +710,7 @@ void BatcherEvent::processPreevict() {
          outgoing_pg_num < sim_sys->GPU_PCIe_batch_num &&
          sim_sys->preevict_CPU_queue.size()) {
       Addr start_addr = sim_sys->preevict_CPU_queue.front();
-      Assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
+      assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
              (outgoing_pg_SSD == sim_sys->SSD_PCIe_batch_num && forced_evc_dest == PageLocation::IN_CPU) ||
              (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == PageLocation::IN_SSD));
       PageLocation destination = forced_evc_dest == PageLocation::NOT_KNOWN ? PageLocation::IN_CPU : forced_evc_dest;
@@ -728,12 +727,12 @@ void BatcherEvent::processPFFetch(deque<Addr>* queue) {
     src = PageLocation::IN_SSD;
   } else if (queue == &sim_sys->prefetch_CPU_queue) {
     src = PageLocation::IN_CPU;
-    Assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
+    assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
   } else if (queue == &sim_sys->prefetch_SSD_queue) {
     src = PageLocation::IN_SSD;
-    Assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
+    assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
   } else {
-    Assert(false);
+    assert(false);
   }
 
   while (incoming_pg_num < sim_sys->GPU_PCIe_batch_num &&
@@ -747,11 +746,11 @@ void BatcherEvent::processPFFetch(deque<Addr>* queue) {
     queue->pop_front();
 
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-    Assert(CPU_PTE->location != IN_GPU);
+    assert(CPU_PTE->location != IN_GPU);
     // <incoming_pg_num, outgoing_pg_num>
     pair<int, int> fetch_info = processFetch(start_addr, src, true);
-    Assert(fetch_info.first >= 0);
-    Assert(fetch_info.second >= 0);
+    assert(fetch_info.first >= 0);
+    assert(fetch_info.second >= 0);
     // fetch limit reached
     if (forced_fetch_src != NOT_KNOWN && forced_fetch_src != src)
       break;
@@ -771,10 +770,10 @@ void BatcherEvent::processPrefetch() {
     // get target starting address
     if (sim_sys->mig_policy == MigPolicy::DEEPUM)    start_addr = sim_sys->prefetch_SSD_queue.front();
     else if (sim_sys->mig_policy == MigPolicy::OURS) start_addr = sim_sys->prefetch_SSD_queue.front();
-    else Assert(false);
+    else assert(false);
     // handle the target page
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-    Assert(CPU_PTE->location != IN_GPU);
+    assert(CPU_PTE->location != IN_GPU);
     PageLocation real_from = CPU_PTE->location;
     if (real_from == IN_SSD) {
       pair<int, int> fetch_info = processFetch(start_addr, real_from, false);
@@ -789,7 +788,7 @@ void BatcherEvent::processPrefetch() {
     // pop target starting address, indicating processing done
     if (sim_sys->mig_policy == MigPolicy::DEEPUM)    sim_sys->prefetch_SSD_queue.pop_front();
     else if (sim_sys->mig_policy == MigPolicy::OURS) sim_sys->prefetch_SSD_queue.pop_front();
-    else Assert(false);
+    else assert(false);
   }
   // CPU prefetch handle
   while (incoming_pg_CPU < sim_sys->CPU_PCIe_batch_num &&
@@ -803,10 +802,10 @@ void BatcherEvent::processPrefetch() {
     // get target starting address
     if (sim_sys->mig_policy == MigPolicy::DEEPUM)    start_addr = sim_sys->prefetch_CPU_queue.front();
     else if (sim_sys->mig_policy == MigPolicy::OURS) start_addr = sim_sys->prefetch_CPU_queue.front();
-    else Assert(false);
+    else assert(false);
     // handle the target page
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-    Assert(CPU_PTE->location != IN_GPU);
+    assert(CPU_PTE->location != IN_GPU);
     PageLocation real_from = CPU_PTE->location;
     if (real_from == IN_CPU) {
       pair<int, int> fetch_info = processFetch(start_addr, real_from, false);
@@ -821,7 +820,7 @@ void BatcherEvent::processPrefetch() {
     // pop target starting address, indicating processing done
     if (sim_sys->mig_policy == MigPolicy::DEEPUM)    sim_sys->prefetch_CPU_queue.pop_front();
     else if (sim_sys->mig_policy == MigPolicy::OURS) sim_sys->prefetch_CPU_queue.pop_front();
-    else Assert(false);
+    else assert(false);
   }
 }
 
@@ -835,7 +834,7 @@ void BatcherEvent::processPFAlloc(deque<Addr>* queue) {
     Addr start_addr = queue->front();
 
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-    Assert(CPU_PTE->location != IN_GPU);
+    assert(CPU_PTE->location != IN_GPU);
     // <allocate_pg_num, outgoing_pg_num>
     pair<int, int> alloc_info = processAlloc(start_addr, true);
     if (alloc_info.first < 0) {
@@ -859,7 +858,7 @@ void BatcherEvent::processAlloc(bool is_pf) {
     Addr start_addr = queue.front();
 
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
-    Assert(CPU_PTE->location != IN_GPU);
+    assert(CPU_PTE->location != IN_GPU);
     // <allocate_pg_num, outgoing_pg_num>
     pair<int, int> alloc_info = processAlloc(start_addr, is_pf);
     if (alloc_info.first < 0) {
@@ -874,18 +873,18 @@ void BatcherEvent::processAlloc(bool is_pf) {
 
 void BatcherEvent::recordFetch(PageLocation src, size_t pg_num) {
   if (pg_num == 0) return;
-  Assert(forced_fetch_src == PageLocation::NOT_KNOWN || forced_fetch_src == src);
+  assert(forced_fetch_src == PageLocation::NOT_KNOWN || forced_fetch_src == src);
   // TODO: logic need to be refined if multiple pages are used in the future
   if (src == IN_SSD) {
     incoming_pg_SSD += pg_num;
-    Assert(incoming_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
+    assert(incoming_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
     if (incoming_pg_SSD == sim_sys->SSD_PCIe_batch_num) forced_fetch_src = IN_CPU;
   } else if (src == IN_CPU) {
     incoming_pg_CPU += pg_num;
-    Assert(incoming_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
+    assert(incoming_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
     if (incoming_pg_CPU == sim_sys->CPU_PCIe_batch_num) forced_fetch_src = IN_SSD;
   } else {
-    Assert(false);
+    assert(false);
   }
   alloc_pg_num += pg_num;
   incoming_pg_num += pg_num;
@@ -893,24 +892,24 @@ void BatcherEvent::recordFetch(PageLocation src, size_t pg_num) {
 
 void BatcherEvent::recordEvict(PageLocation dest, size_t pg_num) {
   if (pg_num == 0) return;
-  Assert(forced_evc_dest == PageLocation::NOT_KNOWN || forced_evc_dest == dest);
+  assert(forced_evc_dest == PageLocation::NOT_KNOWN || forced_evc_dest == dest);
   // TODO: logic need to be refined if multiple pages are used in the future
   if (dest == IN_SSD) {
     outgoing_pg_SSD += pg_num;
     outgoing_pg_num += pg_num;
-    Assert(outgoing_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
+    assert(outgoing_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
     if (outgoing_pg_SSD == sim_sys->SSD_PCIe_batch_num)
       forced_evc_dest = IN_CPU;
   } else if (dest == IN_CPU) {
     outgoing_pg_CPU += pg_num;
     outgoing_pg_num += pg_num;
-    Assert(outgoing_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
+    assert(outgoing_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
     if (outgoing_pg_CPU == sim_sys->CPU_PCIe_batch_num || sim_sys->CPU_PT.reachMemoryLine())
       forced_evc_dest = IN_SSD;
   } else {
-    Assert(false);
+    assert(false);
   }
-  Assert(outgoing_pg_num <= sim_sys->GPU_PCIe_batch_num);
+  assert(outgoing_pg_num <= sim_sys->GPU_PCIe_batch_num);
 }
 
 bool BatcherEvent::shouldExecute() {
@@ -974,26 +973,20 @@ void BatcherEvent::execute(vector<Event *> &created_events) {
       sim_sys->batcher_evt_print_current = 0;
 
     if (!sim_sys->data_transferring) {
-      sim_stat->addTransferBoundary(sim_sys->getCurrentIteration(),
-                                    scheduled_time,
-                                    true);
       sim_sys->data_transferring = true;
     }
   } else {
     if (sim_sys->data_transferring) {
-      sim_stat->addTransferBoundary(sim_sys->getCurrentIteration(),
-                                    scheduled_time,
-                                    false);
       sim_sys->data_transferring = false;
     }
   }
 
-  Assert(incoming_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
-  Assert(incoming_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
-  Assert(incoming_pg_num <= sim_sys->GPU_PCIe_batch_num);
-  Assert(outgoing_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
-  Assert(outgoing_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
-  Assert(outgoing_pg_num <= sim_sys->GPU_PCIe_batch_num);
+  assert(incoming_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
+  assert(incoming_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
+  assert(incoming_pg_num <= sim_sys->GPU_PCIe_batch_num);
+  assert(outgoing_pg_SSD <= sim_sys->SSD_PCIe_batch_num);
+  assert(outgoing_pg_CPU <= sim_sys->CPU_PCIe_batch_num);
+  assert(outgoing_pg_num <= sim_sys->GPU_PCIe_batch_num);
   sim_stat->addPCIeBWStat(sim_sys->getCurrentIteration(), scheduled_time,
                           incoming_pg_num, incoming_pg_SSD, incoming_pg_CPU,
                           outgoing_pg_num, outgoing_pg_SSD, outgoing_pg_CPU,
