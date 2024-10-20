@@ -76,7 +76,7 @@ extern long long memory_offset_weights;
 extern std::vector<CUDAKernel> kernel_list;
 extern std::vector<Tensor*> tensor_list;
 extern std::vector<InactivePeriod*> inactive_periods_list;
-extern std::vector<EvictionGuide_Entry> EvictionGuide_Table;
+extern std::vector<EvictionGuideEntry> EvictionGuideTable;
 extern std::vector<long> GPU_resident_memory_estimation;
 extern std::vector<double> kernel_time_table;
 

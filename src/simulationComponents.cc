@@ -65,7 +65,7 @@ extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
 
 extern vector<DataMovementHint> movement_hints;
-extern vector<EvictionGuideEntry> EvictionGuide_Table;
+extern vector<EvictionGuideEntry> EvictionGuideTable;
 
 extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;
@@ -505,14 +505,14 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
       current_tensor = tensor;
       tensor_coalescing_cnt++;
     } else {
-      Eviction_P hotness = EvictionGuide_Table[kernel_id].entry[current_tensor];
+      Eviction_P hotness = EvictionGuideTable[kernel_id].entry[current_tensor];
       double exact_hotness = hotness == Eviction_P::Dead ? -1 :
-          EvictionGuide_Table[kernel_id].absolute_time_entry[current_tensor];
+          EvictionGuideTable[kernel_id].absolute_time_entry[current_tensor];
       snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n",
           tensor_coalescing_cnt, current_tensor->tensor_id, print_eviction_array[hotness].c_str(), exact_hotness);
       exact_out += string(buf);
 
-      if (EvictionGuide_Table[kernel_id].entry[tensor] == hotness) {
+      if (EvictionGuideTable[kernel_id].entry[tensor] == hotness) {
         hotness_coalescing_cnt += tensor_coalescing_cnt;
       } else {
         snprintf(buf, sizeof(buf), "Num_pages:%10d Hotness:%7s\n",
@@ -525,9 +525,9 @@ string GPUPageTable::reportLRUTable(int kernel_id) {
       tensor_coalescing_cnt = 1;
     }
   }
-  Eviction_P hotness = EvictionGuide_Table[kernel_id].entry[current_tensor];
+  Eviction_P hotness = EvictionGuideTable[kernel_id].entry[current_tensor];
   double exact_hotness = hotness == Eviction_P::Dead ? -1 :
-      EvictionGuide_Table[kernel_id].absolute_time_entry[current_tensor];
+      EvictionGuideTable[kernel_id].absolute_time_entry[current_tensor];
   snprintf(buf, sizeof(buf), "Num_pages:%10d Tensor:%5d Hotness:%7s Exact:%f\n",
       tensor_coalescing_cnt, current_tensor->tensor_id, print_eviction_array[hotness].c_str(), exact_hotness);
   exact_out += string(buf);
