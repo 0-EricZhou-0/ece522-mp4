@@ -65,7 +65,7 @@ extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
 
 extern vector<DataMovementHint> movement_hints;
-extern vector<EvictionGuide_Entry> EvictionGuide_Table;
+extern vector<EvictionGuideEntry> EvictionGuide_Table;
 
 extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;

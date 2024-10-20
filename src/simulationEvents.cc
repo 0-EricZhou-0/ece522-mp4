@@ -92,7 +92,7 @@ bool KernelBeginEvent::requiredPageArrived(vector<Tensor *> &required_tensors, b
       if (total_in_migration_pages > 0 || total_miss_located_pages > 0) {
         printf("   ⊢%13s ", tensor->name().c_str());
         if (tensor->is_global_weight) printf("[  Global   ] ");
-        else printf("[%5d-%5d] ", tensor->live_interval[0], tensor->live_interval[1]);
+        else printf("[%5d-%5d] ", tensor->live_interval.first, tensor->live_interval.second);
         printf("<IN_MIGRATION:%-8ld=CPU:%-8ld+SSD:%-8ld+MALLOC:%-8ld+EVICT:%-8ld>"
             "+<MISS_LOCATED:%-8ld=CPU:%-8ld+SSD:%-8ld+MALLOC:%-8ld>+<IN_PLACE:%-8ld>"
             "/<TOTAL:%-8ld>\n",
@@ -106,7 +106,7 @@ bool KernelBeginEvent::requiredPageArrived(vector<Tensor *> &required_tensors, b
       } else {
         printf("   ⊢%13s ", tensor->name().c_str());
         if (tensor->is_global_weight) printf("[  Global   ] ");
-        else printf("[%5d-%5d] ", tensor->live_interval[0], tensor->live_interval[1]);
+        else printf("[%5d-%5d] ", tensor->live_interval.first, tensor->live_interval.second);
         printf("is in GPU\n");
       }
     }
@@ -189,7 +189,7 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
       }
       hint->human_readable_hint = "Pin";
     } else if (hint->to == PageLocation::IN_GPU) {
-      if (CPU_PTE->location == PageLocation::NOT_PRESENT) {
+      if (CPU_PTE->location == PageLocation::S) {
         // prealloc
         sim_sys->prealloc_queue.push_back(page_starting_addr);
         hint->human_readable_hint = "Prealloc";
@@ -329,7 +329,7 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
       guidedTransfer(&hint);
       printf("   ⊢%13s ", hint.tensor->name().c_str());
       if (hint.tensor->is_global_weight) printf("[  Global   ] ");
-      else printf("[%5d-%5d] ", hint.tensor->live_interval[0], hint.tensor->live_interval[1]);
+      else printf("[%5d-%5d] ", hint.tensor->live_interval.first, hint.tensor->live_interval.second);
       printf("From: %11s, To: %11s, %s\n",
           print_pagelocation_array[hint.from].c_str(),
           print_pagelocation_array[hint.to].c_str(),
@@ -648,12 +648,12 @@ size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf
           "Kernel: %d Tensor: %d Addr: %ld Loc: %s Living: %d-%d\n",
           sim_sys->getCurrentKernel()->kernel_id, tensor->tensor_id,
           start_addr, print_pagelocation_array[dest].c_str(),
-          tensor->live_interval[0], tensor->live_interval[1]);
+          tensor->live_interval.first, tensor->live_interval.second);
     } else {
       eprintf("  Batcher Kernel: %d Tensor: %d Addr: %ld Loc: %s Living: %d-%d\n",
           sim_sys->getCurrentKernel()->kernel_id, tensor->tensor_id,
           start_addr, print_pagelocation_array[dest].c_str(),
-          tensor->live_interval[0], tensor->live_interval[1]);
+          tensor->live_interval.first, tensor->live_interval.second);
       assert(false);
     }
   }

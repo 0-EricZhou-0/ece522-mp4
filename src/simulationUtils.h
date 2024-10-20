@@ -35,7 +35,7 @@ enum MigPolicy{ DEEPUM, OURS };
  */
 class DataMovementHint {
   public:
-    DataMovementHint(PageLocation from, PageLocation to, 
+    DataMovementHint(PageLocation from, PageLocation to,
                      int issued_time, Tensor* tensor) :
         from(from), to(to), issued_time(issued_time), tensor(tensor) {
       assert(to != NOT_KNOWN);
@@ -43,7 +43,7 @@ class DataMovementHint {
     bool operator<(const DataMovementHint& rhs) const {
       return issued_time < rhs.issued_time;
     }
-    
+
     PageLocation from;
     PageLocation to;
     string human_readable_hint;

@@ -75,7 +75,7 @@ extern long long memory_offset_weights;
 // extern std::vector<Model_OP*> forward_ops;
 extern std::vector<CUDAKernel> kernel_list;
 extern std::vector<Tensor*> tensor_list;
-extern std::vector<Inactive_period*> inactive_periods_list;
+extern std::vector<InactivePeriod*> inactive_periods_list;
 extern std::vector<EvictionGuide_Entry> EvictionGuide_Table;
 extern std::vector<long> GPU_resident_memory_estimation;
 extern std::vector<double> kernel_time_table;
@@ -535,30 +535,7 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
-        // printf("use_prefetch: %d\n", use_prefetch);
-        // if (use_prefetch) {
-        // printf("use_prefetch2: %d\n", use_prefetch);
-        //     give_eviction_guide();
-
-        //     // eviction guide
-        //     // r = new RedirStdOut("evc_guide.config");
-        //     // print_eviction_guide_table();
-        //     // delete r;
-
-        //     r = new RedirStdOut("pre_dealloc.config");
-        //     scheduling_prefetch();
-        //     delete r;
-
-        //     // prefetch guide
-        //     r = new RedirStdOut("prefetch_guide.config");
-        //     print_prefetch_table();
-        //     delete r;
-
-        //     // real memory usage
-        //     r = new RedirStdOut("real_mem.config");
-        //     print_GPU_mem_really_in_use();
-        //     delete r;
-        // }
+        scheduling_movement_hints();
 
         // nprintf("Average interval time: %f ms\n", inactive_periods_list[(inactive_periods_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");
