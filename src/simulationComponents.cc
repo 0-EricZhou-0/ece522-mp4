@@ -716,13 +716,12 @@ Stat::Stat(string basename) : output_file_basename(basename) {
   output_files.emplace(EvcStat, make_tuple("evc", ofstream(), true));
   output_files.emplace(TensorStat, make_tuple("pf_tensor", ofstream(), true));
   output_files.emplace(FinalStat, make_tuple("final", ofstream(), false));
+  output_files.emplace(LRUTableStat, make_tuple("lru", ofstream(), false));
 
   // process file names
   for (auto pair = output_files.begin(); pair != output_files.end(); pair++) {
     get<0>(pair->second) = output_file_basename + "." + get<0>(pair->second);
   }
-
-  output_files.emplace(LRUTableStat, make_tuple("lru", ofstream(), false));
 }
 
 Stat::~Stat() {
