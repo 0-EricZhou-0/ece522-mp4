@@ -189,7 +189,7 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
       }
       hint->human_readable_hint = "Pin";
     } else if (hint->to == PageLocation::IN_GPU) {
-      if (CPU_PTE->location == PageLocation::S) {
+      if (CPU_PTE->location == PageLocation::NOT_PRESENT) {
         // prealloc
         sim_sys->prealloc_queue.push_back(page_starting_addr);
         hint->human_readable_hint = "Prealloc";

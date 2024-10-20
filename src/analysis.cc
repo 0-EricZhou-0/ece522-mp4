@@ -145,14 +145,18 @@ void CUDAKernel::getRequiredTensors(std::vector<Tensor *> &required_tensors,
   }
 }
 
-// TODO: You should write a mini compiler pass to fill the liveness information
-// of every tensor (liveness information)
+/**
+ * @brief this function is used to fill the liveness information of every tensor
+ * @todo you should fill the field live_interval for each tensor in the tensor_list
+ *       see descriptions of live_interval in Tensor::live_interval
+ */
 void tensor_first_pass_liveness_analysis() {
   const int tensor_num = tensor_list.size();
   const int kernel_num = kernel_list.size();
 
   for (int i = 0; i < tensor_num; i++) {
     Tensor *current_tensor = tensor_list[i];
+    // TODO: complete liveness analysis
     if (!current_tensor->is_global_weight) {  // This tensor is a local one
       // First we need to find its death time:
       bool find = false;
@@ -188,16 +192,18 @@ void Tensor::print_liveness() {
   }
 }
 
-// TODO: You should write another compiler pass to fill all the inactive periods
-// for every tensor (inactive_periods)
+/**
+ * @brief this function is used to fill the inactive period information of every tensor
+ * @todo you should fill the field inactive_periods for each tensor in the tensor_list
+ *       see descriptions of inactive_periods in Tensor::inactive_periods
+ */
 void tensor_second_pass_interval_formation() {
   const int tensor_num = tensor_list.size();
   const int kernel_num = kernel_list.size();
 
-  long target_mem_line = (long)(GPU_memory_size_GB * 1024 * 1024 * 1024);
-
   for (int i = 0; i < tensor_num; i++) {
     Tensor *current_tensor = tensor_list[i];
+    // TODO: complete inactive period analysis
     if (!current_tensor->is_global_weight) {
       if (current_tensor->live_interval.second != -1) {
         bool a_interval_started = false;

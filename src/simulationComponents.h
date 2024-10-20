@@ -494,10 +494,8 @@ class Stat {
       PCIeStat,
       EvcStat,
       TensorStat,
-      TransferBoundaryStat,
       FinalStat,
-      LRUTableStat,
-      KernelTimeBreakdownStat
+      LRUTableStat
     };
 
     Stat(string basename);

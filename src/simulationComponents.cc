@@ -715,9 +715,7 @@ Stat::Stat(string basename) : output_file_basename(basename) {
   output_files.emplace(PCIeStat, make_tuple("pcie", ofstream(), true));
   output_files.emplace(EvcStat, make_tuple("evc", ofstream(), true));
   output_files.emplace(TensorStat, make_tuple("pf_tensor", ofstream(), true));
-  output_files.emplace(TransferBoundaryStat, make_tuple("transfer_boundary", ofstream(), true));
   output_files.emplace(FinalStat, make_tuple("final", ofstream(), false));
-  output_files.emplace(KernelTimeBreakdownStat, make_tuple("kernelStall", ofstream(), false));
 
   // process file names
   for (auto pair = output_files.begin(); pair != output_files.end(); pair++) {
@@ -838,7 +836,7 @@ void Stat::addLRUTableStat(int current_iter,
 void Stat::prepareOutputFiles(bool final_only) {
   // clear and prepare output files
   for (auto pair = output_files.begin(); pair != output_files.end(); pair++) {
-    if (final_only && pair->first != FinalStat && pair->first != KernelTimeBreakdownStat)
+    if (final_only && pair->first != FinalStat)
       continue;
     string filename = get<0>(pair->second);
     ofstream& fout = get<1>(pair->second);

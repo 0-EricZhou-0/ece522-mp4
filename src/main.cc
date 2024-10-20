@@ -70,7 +70,7 @@ extern double delta_parameter;
 extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;
 
-// 
+//
 // extern std::vector<Model_Layer*> forward_layers;
 // extern std::vector<Model_OP*> forward_ops;
 extern std::vector<CUDAKernel> kernel_list;
