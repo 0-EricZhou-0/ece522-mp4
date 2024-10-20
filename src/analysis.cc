@@ -46,7 +46,7 @@ std::vector<CUDAKernel> kernel_list;
 std::vector<InactivePeriod *> inactive_periods_list;
 
 std::vector<double> kernel_time_table;
-std::vector<EvictionGuide_Entry> EvictionGuide_Table;
+std::vector<EvictionGuideEntry> EvictionGuideTable;
 std::vector<long> GPU_resident_memory_estimation;
 std::vector<long> CPU_resident_memory_estimation;
 
