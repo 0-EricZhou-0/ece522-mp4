@@ -72,12 +72,12 @@ class Tensor {
         // Following is the assess pattern information, which is not automatically filled with the model graph input.
 
         /**
-         * @brief Stores liveness information.
+         * @brief Stores liveness information (left inclusive and right exclusive).
          *        live_interval.first = the first kernel that used the tensor
          *        live_interval.second = (the last kernel that used the tensor) + 1
          *        Only intermediate tensor has meaningful liveness interval.
          */
-        std::pair<int, int> live_interval;
+        std::pair<int, int> live_interval = { -1, -1 };
         std::vector<InactivePeriod*> inactive_periods;  //TODO: Important:  A vector of inactive periods of this tensor. With the start of inactive_period sorted in ascending order
 
 };
@@ -85,12 +85,11 @@ class Tensor {
 class InactivePeriod {
   public:
     /**
-     * @brief Stores inactive period information.
+     * @brief Stores inactive period information (left inclusive and right exclusive).
      *        kernelLevel_interval.first =  the first kernel ID that the tensor is inactive
      *        kernelLevel_interval.second = (the last kernel ID that the tensor is inactive) + 1
-     *        kernelLevel_interval should at least at least contain one kernel.  e.g., 456----457
      */
-    std::pair<int, int> kernelLevel_interval;
+    std::pair<int, int> kernelLevel_interval = { -1, -1 };
     // If true, it means that the tensor is a global tensor, and
     // kernelLevel_interval.first > kernelLevel_interval.second.
     bool is_looped;
