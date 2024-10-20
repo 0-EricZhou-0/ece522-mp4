@@ -50,7 +50,7 @@ double SSD_write_latency_us = -1;
 // PCIe statistics
 int PCIe_batch_size_in_page = -1;
 // Other parameters
-bool use_prefetch = false;
+bool use_movement_hints = false;
 string migration_policy_str;
 string eviction_policy_str;
 MigPolicy migration_policy;
@@ -555,7 +555,7 @@ System::System() :
     GPU_free_cycle_per_page(0), // parameter not used
     SSD_read_latency_cycle(SSD_read_latency_us / pow(10, 6) * GPU_frequency_Hz),
     SSD_write_latency_cycle(SSD_write_latency_us / pow(10, 6) * GPU_frequency_Hz),
-    should_prefetch(use_prefetch),
+    should_use_movement_hints(use_movement_hints),
     mig_policy(migration_policy),
     evc_policy(eviction_policy),
     sys_prefetch_degree(prefetch_degree),
@@ -573,7 +573,7 @@ System::System() :
   printf("========== Simulation Setting ==========\n");
   printf(" General:\n");
   printf("  Using UVM:                  %s\n", is_UVM ? "True" : "False");
-  printf("  Prefetch Enabled:           %s\n", use_prefetch ? "True" : "False");
+  printf("  Prefetch Enabled:           %s\n", use_movement_hints ? "True" : "False");
   printf("  Eviction Policy:            %s\n", eviction_policy_str.c_str());
   printf(" CPU:\n");
   printf("  CPU PCIe BW Byte/Cycle:     %-10f\n", CPU_PCIe_bandwidth_Bpc);

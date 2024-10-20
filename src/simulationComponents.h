@@ -206,50 +206,6 @@ class GPUPageTable {
     const unsigned candidate_cnt;
 };
 
-// class GPUMMU {
-//   public:
-//     enum MMUAction { ALLOC, FREE };
-//     struct GPUMMUEntry {
-//       Addr page_start;
-//       MMUAction action;
-//       bool is_critical;
-//       unsigned long finishing_timestamp;
-//     };
-
-//     GPUMMU(unsigned alloc_cycle_per_page, unsigned free_cycle_per_page) :
-//         alloc_cycle_per_page(alloc_cycle_per_page), free_cycle_per_page(free_cycle_per_page),
-//         name("GPU MMU") {};
-//     void addToQueue(Addr page_start, MMUAction action,
-//                     bool is_critical, bool append = false);
-//     bool needAction();
-//     GPUMMUEntry manageFrontRequest(unsigned long timestamp);
-//     bool hasCompletedRequest(unsigned long timestamp);
-//     bool hasManagingCriticalRequest();
-//     bool hasWaitingCriticalRequest();
-//     bool getFrontCompletedRequest(unsigned long timestamp, GPUMMUEntry &entry);
-//     bool removeFrontCompletedRequest(unsigned long timestamp);
-//     unsigned long getCriticalBlockingFinishingTime(unsigned long timestamp);
-
-//     void reportMMUStatus();
-
-//   private:
-//     GPUMMU();
-
-//     const unsigned alloc_cycle_per_page;
-//     const unsigned free_cycle_per_page;
-
-//     deque<GPUMMUEntry> managing_queue;
-//     deque<GPUMMUEntry> waiting_queue;
-//     size_t critical_pages_count;
-//     const string name;
-
-//     unsigned long alloc_request_num = 0;
-//     unsigned long alloc_pages = 0;
-//     unsigned long free_request_num = 0;
-//     unsigned long free_pages = 0;
-// };
-
-
 //Input:
 // t_00: Fully PF execution time from profiling (ms)
 // t_10: (InputPF) Output Fully PF time from profiling (ms)
@@ -352,7 +308,7 @@ class System {
     const unsigned SSD_read_latency_cycle;
     const unsigned SSD_write_latency_cycle;
 
-    const bool should_prefetch;
+    const bool should_use_movement_hints;
     // Migration policy
     const MigPolicy mig_policy;
     // GPU page table eviction policy

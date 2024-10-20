@@ -39,7 +39,7 @@ extern double SSD_PCIe_bandwidth_GBps;
 // PCIe sim param
 extern int PCIe_batch_size_in_page;
 // Other sim param
-extern bool use_prefetch;
+extern bool use_movement_hints;
 extern std::string migration_policy_str;
 extern std::string eviction_policy_str;
 extern Simulator::MigPolicy migration_policy;
@@ -369,7 +369,7 @@ void parse_config_args(std::string config_file_path) {
         else if (command == "is_cudnn")                 { is_cudnn = std::stoi(value) != 0; }
         // simulation general settings
         else if (command == "is_ideal")                 { is_ideal = std::stoi(value) != 0; }
-        else if (command == "use_prefetch")             { use_prefetch = std::stoi(value) != 0; printf("use_prefetch: %d\n", use_prefetch); }
+        else if (command == "use_movement_hints")       { use_movement_hints = std::stoi(value) != 0; }
         else if (command == "tensor_info_file")         { tensor_info_file = value; }
         else if (command == "kernel_info_file")         { kernel_info_file = value; }
         else if (command == "kernel_aux_time_file")     { kernel_aux_time_file = value; }
@@ -419,7 +419,6 @@ int main(int argc, char *argv[]) {
     std::string config_file_path = string(argv[1]);
 
     parse_config_args(config_file_path);
-    use_prefetch = 1;
     // sanity check
     assert((int) Simulator::GPUPageTable::EvcPolicy::DEEPUM != (int) Simulator::MigPolicy::DEEPUM);
 
@@ -535,7 +534,8 @@ int main(int argc, char *argv[]) {
         }
         delete r;
 
-        scheduling_movement_hints();
+        if (use_movement_hints)
+            scheduling_movement_hints();
 
         // nprintf("Average interval time: %f ms\n", inactive_periods_list[(inactive_periods_list.size() - 1) / 2]->time_estimated);
         iprintf("Checking output stat files\n", "");

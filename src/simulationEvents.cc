@@ -319,7 +319,7 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
   sim_sys->GPU_PT.report();
 
   // prefetch, pre(de)alloc, pre-evict guide
-  if (sim_sys->should_prefetch) {
+  if (sim_sys->should_use_movement_hints) {
     vector<DataMovementHint> current_hints;
     sim_sys->getCurrentMovementHints(current_hints);
     if (current_hints.size() != 0)

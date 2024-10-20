@@ -157,28 +157,11 @@ void tensor_first_pass_liveness_analysis() {
   for (int i = 0; i < tensor_num; i++) {
     Tensor *current_tensor = tensor_list[i];
     // TODO: complete liveness analysis
-    if (!current_tensor->is_global_weight) {  // This tensor is a local one
-      // First we need to find its death time:
-      bool find = false;
-      for (int j = kernel_num - 1; j >= 0; j--) {
-        if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end()) {
-          find = true;
-          current_tensor->live_interval.second = j + 1;
-          break;
-        }
-      }
-      if (!find) {
-        current_tensor->live_interval.second = -1;
-      }
-      // Second we need to find its birth time
-      for (int j = 0; j < kernel_num; j++) {
-        if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end() ||
-            kernel_list[j].outputs.find(current_tensor) != kernel_list[j].outputs.end()) {
-          current_tensor->live_interval.first = j;
-          break;
-        }
-      }
+    if (!current_tensor->is_global_weight) {
+      // This tensor is intermediate
+
     }
+    // global tensors do not need this info
   }
 }
 
@@ -205,142 +188,11 @@ void tensor_second_pass_interval_formation() {
     Tensor *current_tensor = tensor_list[i];
     // TODO: complete inactive period analysis
     if (!current_tensor->is_global_weight) {
-      if (current_tensor->live_interval.second != -1) {
-        bool a_interval_started = false;
-        for (int j = current_tensor->live_interval.first; j < current_tensor->live_interval.second; j++) {
-          // j is the current kernel;
-          if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end() ||
-              kernel_list[j].outputs.find(current_tensor) != kernel_list[j].outputs.end()) {
-            if (!a_interval_started) {
-              if (j + 1 < current_tensor->live_interval.second &&
-                  kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                  kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-                // Start one interval
-                InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-                new_interval->kernelLevel_interval.first = j + 1;
-                a_interval_started = true;
-                current_tensor->inactive_periods.push_back(new_interval);
-                inactive_periods_list.push_back(new_interval);
-              }
-            } else {
-              inactive_periods_list.back()->kernelLevel_interval.second = j;
-              a_interval_started = false;
+      // This tensor is intermediate
 
-              if (j + 1 < current_tensor->live_interval.second &&
-                  kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                  kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-                // Start one interval
-                InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-                new_interval->kernelLevel_interval.first = j + 1;
-                a_interval_started = true;
-                current_tensor->inactive_periods.push_back(new_interval);
-                inactive_periods_list.push_back(new_interval);
-              }
-            }
-          }
-        }
-        assert(!a_interval_started);
-      }
     } else {
       // This tensor is global
-      // First find one use
-      int one_use = 0;
-      for (int j = 0; j < kernel_num; j++) {
-        if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end() ||
-            kernel_list[j].outputs.find(current_tensor) != kernel_list[j].outputs.end()) {
-          one_use = j;
-          break;
-        }
-      }
 
-      bool a_interval_started = false;
-      for (int j = one_use; j < kernel_num; j++) {
-        // j is the current kernel;
-        if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end() ||
-            kernel_list[j].outputs.find(current_tensor) != kernel_list[j].outputs.end()) {
-          if (!a_interval_started) {
-            if (j + 1 < kernel_num &&
-                kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = j + 1;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            } else if (j + 1 == kernel_num &&
-                       kernel_list[0].inputs.find(current_tensor) == kernel_list[0].inputs.end() &&
-                       kernel_list[0].outputs.find(current_tensor) == kernel_list[0].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = 0;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            }
-          } else {
-            inactive_periods_list.back()->kernelLevel_interval.second = j;
-            a_interval_started = false;
-
-            if (j + 1 < kernel_num &&
-                kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = j + 1;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            } else if (j + 1 == kernel_num &&
-                       kernel_list[0].inputs.find(current_tensor) == kernel_list[0].inputs.end() &&
-                       kernel_list[0].outputs.find(current_tensor) == kernel_list[0].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = 0;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            }
-          }
-        }
-      }
-      for (int j = 0; j <= one_use; j++) {
-        // j is the current kernel;
-        if (kernel_list[j].inputs.find(current_tensor) != kernel_list[j].inputs.end() ||
-            kernel_list[j].outputs.find(current_tensor) != kernel_list[j].outputs.end()) {
-          if (!a_interval_started) {
-            if (j < one_use &&
-                kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = j + 1;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            }
-          } else {
-            inactive_periods_list.back()->kernelLevel_interval.second = j;
-            if (j < inactive_periods_list.back()->kernelLevel_interval.first) {
-              inactive_periods_list.back()->is_looped = 1;
-            }
-            a_interval_started = false;
-
-            if (j < one_use &&
-                kernel_list[j + 1].inputs.find(current_tensor) == kernel_list[j + 1].inputs.end() &&
-                kernel_list[j + 1].outputs.find(current_tensor) == kernel_list[j + 1].outputs.end()) {
-              // Start one interval
-              InactivePeriod *new_interval = new InactivePeriod(current_tensor);
-              new_interval->kernelLevel_interval.first = j + 1;
-              a_interval_started = true;
-              current_tensor->inactive_periods.push_back(new_interval);
-              inactive_periods_list.push_back(new_interval);
-            }
-          }
-        }
-      }
-
-      assert(!a_interval_started);
     }
   }
 }
