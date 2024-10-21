@@ -20,10 +20,10 @@ inline bool isPageSized(unsigned long size) {
 
 namespace Simulator {
 
-enum PageLocation{ NOT_PRESENT, IN_SSD, IN_CPU, IN_GPU, NOT_KNOWN, IN_GPU_LEAST };
+enum TensorLocation{ NOT_PRESENT, IN_SSD, IN_CPU, IN_GPU, NOT_KNOWN, IN_GPU_LEAST };
 
 const std::string print_pagelocation_array [6] = {
-    "Not_present", "In_ssd", "In_cpu", "In_gpu", "Not_Known", "In_gpu_least"
+    "Not_Present", "In_SSD", "In_CPU", "In_GPU", "Not_Known", "In_GPU_Least"
 };
 
 enum GPUPageTableEvcPolicy{ RANDOM, LRU, GUIDED };
@@ -33,21 +33,21 @@ enum MigPolicy{ DEEPUM, OURS };
 /**
  * @brief
  */
-class DataMovementHint {
+class TensorMovementHint {
   public:
-    DataMovementHint(PageLocation from, PageLocation to,
-                     int issued_time, Tensor* tensor) :
-        from(from), to(to), issued_time(issued_time), tensor(tensor) {
+    TensorMovementHint(TensorLocation from, TensorLocation to,
+                     int issued_kernel_id, Tensor* tensor) :
+        from(from), to(to), issued_kernel_id(issued_kernel_id), tensor(tensor) {
       assert(to != NOT_KNOWN);
     }
-    bool operator<(const DataMovementHint& rhs) const {
-      return issued_time < rhs.issued_time;
+    bool operator<(const TensorMovementHint& rhs) const {
+      return issued_kernel_id < rhs.issued_kernel_id;
     }
 
-    PageLocation from;
-    PageLocation to;
+    TensorLocation from;
+    TensorLocation to;
     string human_readable_hint;
-    int issued_time;
+    int issued_kernel_id;
     Tensor* tensor;
 };
 

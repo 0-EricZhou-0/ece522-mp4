@@ -45,7 +45,7 @@ class CPUPageTable {
     // CPU page table entries
     struct CPUPageTableEntry {
       Addr ppn;
-      PageLocation location;
+      TensorLocation location;
       bool in_transfer;
     };
     CPUPageTable(int expected_size, int memory_line);
@@ -171,7 +171,7 @@ class GPUPageTable {
 
     bool isFull();
 
-    tuple<Addr, GPUPageTableEntry, PageLocation, EvictCandidate>
+    tuple<Addr, GPUPageTableEntry, TensorLocation, EvictCandidate>
         selectEvictPTE(int kernel_id, bool is_pf);
 
     pair<size_t, size_t> getCapacity();
@@ -372,7 +372,7 @@ class System {
      */
     int getCurrentIteration();
 
-    void getCurrentMovementHints(vector<DataMovementHint> &hints);
+    void getCurrentMovementHints(vector<TensorMovementHint> &hints);
 
     /**
      * @brief get current total page fault number
@@ -485,7 +485,7 @@ class Stat {
     void addEvcSelection(int current_iter,
                          unsigned long start_time,
                          int kernel_id,
-                         PageLocation to,
+                         TensorLocation to,
                          GPUPageTable::EvictCandidate& candidate);
     void addPFTensor(int current_iter,
                      Tensor *tensor,

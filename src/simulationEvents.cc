@@ -13,12 +13,12 @@ using std::pair;
 using std::string;
 using std::make_pair;
 using std::make_tuple;
-using Simulator::DataMovementHint;
-using Simulator::PageLocation;
+using Simulator::TensorMovementHint;
+using Simulator::TensorLocation;
 
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
-extern vector<DataMovementHint> movement_hints;
+extern vector<TensorMovementHint> movement_hints;
 
 extern string output_folder_name;
 
@@ -125,7 +125,7 @@ PageFaultInfo KernelBeginEvent::transferTensorToGPU(Tensor *tensor, bool is_inpu
   if (is_input) info.total_input_pages += total_pages;
   else info.total_output_pages += total_pages;
 
-  PageLocation destination = PageLocation::NOT_PRESENT;
+  TensorLocation destination = TensorLocation::NOT_PRESENT;
   for (long page_num = 0; page_num < total_pages; page_num++) {
     Addr page_starting_addr = start_addr + PAGE_SIZE * page_num;
     CPUPageTable::CPUPageTableEntry *CPU_PTE =
@@ -144,7 +144,7 @@ PageFaultInfo KernelBeginEvent::transferTensorToGPU(Tensor *tensor, bool is_inpu
       if (is_input) info.SSD_to_GPU_faulted_input_pages++;
       else info.SSD_to_GPU_faulted_output_pages++;
       sim_sys->pf_SSD_queue.push_back(page_starting_addr);
-      destination = PageLocation::IN_GPU;
+      destination = TensorLocation::IN_GPU;
     } else if (CPU_PTE->location == IN_CPU) {
       if (is_input) info.CPU_to_GPU_faulted_input_pages++;
       else info.CPU_to_GPU_faulted_output_pages++;
@@ -156,12 +156,12 @@ PageFaultInfo KernelBeginEvent::transferTensorToGPU(Tensor *tensor, bool is_inpu
     }
     sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
   }
-  if (destination == PageLocation::IN_GPU)
+  if (destination == TensorLocation::IN_GPU)
     sim_stat->addSizeInfo(tensor->raw_size_byte, tensor->size_in_byte);
   return info;
 }
 
-void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
+void KernelBeginEvent::guidedTransfer(TensorMovementHint *hint) {
   Tensor *tensor = hint->tensor;
   Addr start_addr = tensor->getGlobalOffset();
   long size = (long) tensor->size_in_byte;
@@ -174,41 +174,41 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
     if (CPU_PTE->in_transfer)
       continue;
 
-    if (hint->from == PageLocation::IN_GPU_LEAST) {
-      assert(hint->to == PageLocation::IN_GPU);
+    if (hint->from == TensorLocation::IN_GPU_LEAST) {
+      assert(hint->to == TensorLocation::IN_GPU);
       if (sim_sys->GPU_PT.exist(page_starting_addr)) {
         // Unpin
         sim_sys->GPU_PT.LRUUnpin(page_starting_addr);
       }
       hint->human_readable_hint = "Unpin";
-    } else if (hint->to == PageLocation::IN_GPU_LEAST) {
-      assert(hint->from == PageLocation::IN_GPU);
+    } else if (hint->to == TensorLocation::IN_GPU_LEAST) {
+      assert(hint->from == TensorLocation::IN_GPU);
       if (sim_sys->GPU_PT.exist(page_starting_addr)) {
         // Pin
         sim_sys->GPU_PT.LRUPin(page_starting_addr);
       }
       hint->human_readable_hint = "Pin";
-    } else if (hint->to == PageLocation::IN_GPU) {
-      if (CPU_PTE->location == PageLocation::NOT_PRESENT) {
+    } else if (hint->to == TensorLocation::IN_GPU) {
+      if (CPU_PTE->location == TensorLocation::NOT_PRESENT) {
         // prealloc
         sim_sys->prealloc_queue.push_back(page_starting_addr);
         hint->human_readable_hint = "Prealloc";
         sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
-      } else if (CPU_PTE->location == PageLocation::IN_SSD) {
+      } else if (CPU_PTE->location == TensorLocation::IN_SSD) {
         // prefetch from SSD
         sim_sys->prefetch_SSD_queue.push_back(page_starting_addr);
         hint->human_readable_hint = "Prefetch";
         sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
-      } else if (CPU_PTE->location == PageLocation::IN_CPU) {
+      } else if (CPU_PTE->location == TensorLocation::IN_CPU) {
         // prefetch from CPU
         sim_sys->prefetch_CPU_queue.push_back(page_starting_addr);
         hint->human_readable_hint = "Prefetch";
         sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
       }
-    } else if (hint->to == PageLocation::IN_SSD || hint->to == PageLocation::IN_CPU) {
-      if (CPU_PTE->location == PageLocation::IN_GPU) {
+    } else if (hint->to == TensorLocation::IN_SSD || hint->to == TensorLocation::IN_CPU) {
+      if (CPU_PTE->location == TensorLocation::IN_GPU) {
         // pre-evict
-        if (hint->to == PageLocation::IN_SSD) {
+        if (hint->to == TensorLocation::IN_SSD) {
           sim_sys->preevict_SSD_queue.push_back(page_starting_addr);
         } else {
           sim_sys->preevict_CPU_queue.push_back(page_starting_addr);
@@ -216,17 +216,17 @@ void KernelBeginEvent::guidedTransfer(DataMovementHint *hint) {
         hint->human_readable_hint = "Pre-evict";
         sim_sys->CPU_PT.markInTransferPTE(page_starting_addr);
       }
-    } else if (hint->to == PageLocation::NOT_PRESENT) {
+    } else if (hint->to == TensorLocation::NOT_PRESENT) {
       // pre-dealloc, immediate
-      if (CPU_PTE->location == PageLocation::IN_GPU) {
+      if (CPU_PTE->location == TensorLocation::IN_GPU) {
         if (sim_sys->GPU_PT.exist(page_starting_addr))
           sim_sys->GPU_PT.erasePTE(page_starting_addr);
-      } else if (CPU_PTE->location == PageLocation::IN_SSD) {
-      } else if (CPU_PTE->location == PageLocation::IN_CPU) {
+      } else if (CPU_PTE->location == TensorLocation::IN_SSD) {
+      } else if (CPU_PTE->location == TensorLocation::IN_CPU) {
         if (sim_sys->CPU_PT.exist(page_starting_addr))
           sim_sys->CPU_PT.erasePTE(page_starting_addr);
       }
-      CPU_PTE->location = PageLocation::NOT_PRESENT;
+      CPU_PTE->location = TensorLocation::NOT_PRESENT;
       hint->human_readable_hint = "Predealloc";
       assert(!sim_sys->GPU_PT.exist(page_starting_addr));
     } else {
@@ -320,12 +320,12 @@ void KernelBeginEvent::execute(vector<Event *> &created_events) {
 
   // prefetch, pre(de)alloc, pre-evict guide
   if (sim_sys->should_use_movement_hints) {
-    vector<DataMovementHint> current_hints;
+    vector<TensorMovementHint> current_hints;
     sim_sys->getCurrentMovementHints(current_hints);
     if (current_hints.size() != 0)
       iprintf("  Guide report\n", "");
-    for (DataMovementHint hint : current_hints) {
-      assert(hint.issued_time % kernel_list.size() == sim_sys->getCurrentKernel()->kernel_id);
+    for (TensorMovementHint hint : current_hints) {
+      assert(hint.issued_kernel_id % kernel_list.size() == sim_sys->getCurrentKernel()->kernel_id);
       guidedTransfer(&hint);
       printf("   ⊢%13s ", hint.tensor->name().c_str());
       if (hint.tensor->is_global_weight) printf("[  Global   ] ");
@@ -544,7 +544,7 @@ void performance_model(double t_00, double t_10, double t_11, double r_input, do
 
 
 // BatcherEvent BEGIN ========================
-pair<int, int> BatcherEvent::processFetch(Addr start_addr, PageLocation src, bool is_pf) {
+pair<int, int> BatcherEvent::processFetch(Addr start_addr, TensorLocation src, bool is_pf) {
   // <pg_move_in, pg_move_out>
   // continue to alloc it in GPU
   pair<int, int> alloc_info = processAlloc(start_addr, is_pf);
@@ -573,10 +573,10 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     // free slot in GPU PT
     alloc_info.second = 0;
     // remove the page in CPU and reset force eviction destination if necessary
-    if (CPU_PTE->location == PageLocation::IN_CPU) {
+    if (CPU_PTE->location == TensorLocation::IN_CPU) {
       sim_sys->CPU_PT.erasePTE(start_addr);
-      if (forced_evc_dest == PageLocation::IN_SSD)
-        forced_evc_dest = PageLocation::NOT_KNOWN;
+      if (forced_evc_dest == TensorLocation::IN_SSD)
+        forced_evc_dest = TensorLocation::NOT_KNOWN;
     }
     sim_sys->GPU_PT.markArrivedPTE(start_addr);
     sim_sys->CPU_PT.markArrivedPTE(start_addr);
@@ -588,7 +588,7 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     auto evict_entry = sim_sys->GPU_PT.selectEvictPTE(
         sim_sys->getCurrentKernel()->kernel_id, is_pf);
     Addr vpn = get<0>(evict_entry);
-    PageLocation destination = std::get<2>(evict_entry);
+    TensorLocation destination = std::get<2>(evict_entry);
     Tensor *candidate_tensor = std::get<3>(evict_entry).tensor;
     // DEEPUM specific handling
     if (candidate_tensor == nullptr) {
@@ -600,7 +600,7 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     }
     assert(!sim_sys->CPU_PT.getEntry(vpn)->in_transfer);
     // destination override
-    if (destination != PageLocation::NOT_PRESENT && forced_evc_dest != PageLocation::NOT_KNOWN)
+    if (destination != TensorLocation::NOT_PRESENT && forced_evc_dest != TensorLocation::NOT_KNOWN)
       destination = forced_evc_dest;
     alloc_info.second = processEvict(vpn, destination, true);
     // sanity check
@@ -608,10 +608,10 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
     bool living = candidate_tensor->is_alive(sim_sys->getCurrentKernel()->kernel_id);
     assert(!(living && destination == NOT_PRESENT));
     // remove the page in CPU and reset force eviction destination if necessary
-    if (CPU_PTE->location == PageLocation::IN_CPU) {
+    if (CPU_PTE->location == TensorLocation::IN_CPU) {
       sim_sys->CPU_PT.erasePTE(start_addr);
-      if (forced_evc_dest == PageLocation::IN_SSD)
-        forced_evc_dest = PageLocation::NOT_KNOWN;
+      if (forced_evc_dest == TensorLocation::IN_SSD)
+        forced_evc_dest = TensorLocation::NOT_KNOWN;
     }
     // alloc new page in GPU PT
     assert(sim_sys->GPU_PT.allocPTE(start_addr));
@@ -634,7 +634,7 @@ pair<int, int> BatcherEvent::processAlloc(Addr start_addr, bool is_pf) {
   return alloc_info;
 }
 
-size_t BatcherEvent::processEvict(Addr start_addr, PageLocation dest, bool is_pf) {
+size_t BatcherEvent::processEvict(Addr start_addr, TensorLocation dest, bool is_pf) {
   CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
   assert(CPU_PTE);
   assert(is_pf || CPU_PTE->in_transfer);
@@ -699,9 +699,9 @@ void BatcherEvent::processPreevict() {
          outgoing_pg_num < sim_sys->GPU_PCIe_batch_num &&
          sim_sys->preevict_SSD_queue.size()) {
       Addr start_addr = sim_sys->preevict_SSD_queue.front();
-      assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
-             (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == PageLocation::IN_SSD));
-      PageLocation destination = forced_evc_dest == PageLocation::NOT_KNOWN ? PageLocation::IN_SSD : forced_evc_dest;
+      assert(forced_evc_dest == TensorLocation::NOT_KNOWN ||
+             (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == TensorLocation::IN_SSD));
+      TensorLocation destination = forced_evc_dest == TensorLocation::NOT_KNOWN ? TensorLocation::IN_SSD : forced_evc_dest;
       size_t out = processEvict(start_addr, destination, false);
       sim_sys->preevict_SSD_queue.pop_front();
   }
@@ -710,26 +710,26 @@ void BatcherEvent::processPreevict() {
          outgoing_pg_num < sim_sys->GPU_PCIe_batch_num &&
          sim_sys->preevict_CPU_queue.size()) {
       Addr start_addr = sim_sys->preevict_CPU_queue.front();
-      assert(forced_evc_dest == PageLocation::NOT_KNOWN ||
-             (outgoing_pg_SSD == sim_sys->SSD_PCIe_batch_num && forced_evc_dest == PageLocation::IN_CPU) ||
-             (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == PageLocation::IN_SSD));
-      PageLocation destination = forced_evc_dest == PageLocation::NOT_KNOWN ? PageLocation::IN_CPU : forced_evc_dest;
+      assert(forced_evc_dest == TensorLocation::NOT_KNOWN ||
+             (outgoing_pg_SSD == sim_sys->SSD_PCIe_batch_num && forced_evc_dest == TensorLocation::IN_CPU) ||
+             (sim_sys->CPU_PT.reachMemoryLine() && forced_evc_dest == TensorLocation::IN_SSD));
+      TensorLocation destination = forced_evc_dest == TensorLocation::NOT_KNOWN ? TensorLocation::IN_CPU : forced_evc_dest;
       size_t out = processEvict(start_addr, destination, false);
       sim_sys->preevict_CPU_queue.pop_front();
   }
 }
 
 void BatcherEvent::processPFFetch(deque<Addr>* queue) {
-  PageLocation src = NOT_KNOWN;
+  TensorLocation src = NOT_KNOWN;
   if (queue == &sim_sys->pf_CPU_queue) {
-    src = PageLocation::IN_CPU;
+    src = TensorLocation::IN_CPU;
   } else if (queue == &sim_sys->pf_SSD_queue) {
-    src = PageLocation::IN_SSD;
+    src = TensorLocation::IN_SSD;
   } else if (queue == &sim_sys->prefetch_CPU_queue) {
-    src = PageLocation::IN_CPU;
+    src = TensorLocation::IN_CPU;
     assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
   } else if (queue == &sim_sys->prefetch_SSD_queue) {
-    src = PageLocation::IN_SSD;
+    src = TensorLocation::IN_SSD;
     assert(sim_sys->mig_policy == MigPolicy::DEEPUM);
   } else {
     assert(false);
@@ -774,7 +774,7 @@ void BatcherEvent::processPrefetch() {
     // handle the target page
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
     assert(CPU_PTE->location != IN_GPU);
-    PageLocation real_from = CPU_PTE->location;
+    TensorLocation real_from = CPU_PTE->location;
     if (real_from == IN_SSD) {
       pair<int, int> fetch_info = processFetch(start_addr, real_from, false);
       // stalling by direct return
@@ -806,7 +806,7 @@ void BatcherEvent::processPrefetch() {
     // handle the target page
     CPUPageTable::CPUPageTableEntry *CPU_PTE = sim_sys->CPU_PT.getEntry(start_addr);
     assert(CPU_PTE->location != IN_GPU);
-    PageLocation real_from = CPU_PTE->location;
+    TensorLocation real_from = CPU_PTE->location;
     if (real_from == IN_CPU) {
       pair<int, int> fetch_info = processFetch(start_addr, real_from, false);
       // stalling by direct return
@@ -871,9 +871,9 @@ void BatcherEvent::processAlloc(bool is_pf) {
   }
 }
 
-void BatcherEvent::recordFetch(PageLocation src, size_t pg_num) {
+void BatcherEvent::recordFetch(TensorLocation src, size_t pg_num) {
   if (pg_num == 0) return;
-  assert(forced_fetch_src == PageLocation::NOT_KNOWN || forced_fetch_src == src);
+  assert(forced_fetch_src == TensorLocation::NOT_KNOWN || forced_fetch_src == src);
   // TODO: logic need to be refined if multiple pages are used in the future
   if (src == IN_SSD) {
     incoming_pg_SSD += pg_num;
@@ -890,9 +890,9 @@ void BatcherEvent::recordFetch(PageLocation src, size_t pg_num) {
   incoming_pg_num += pg_num;
 }
 
-void BatcherEvent::recordEvict(PageLocation dest, size_t pg_num) {
+void BatcherEvent::recordEvict(TensorLocation dest, size_t pg_num) {
   if (pg_num == 0) return;
-  assert(forced_evc_dest == PageLocation::NOT_KNOWN || forced_evc_dest == dest);
+  assert(forced_evc_dest == TensorLocation::NOT_KNOWN || forced_evc_dest == dest);
   // TODO: logic need to be refined if multiple pages are used in the future
   if (dest == IN_SSD) {
     outgoing_pg_SSD += pg_num;

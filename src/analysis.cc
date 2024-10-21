@@ -14,8 +14,8 @@
 #include "simulator.h"
 #include "printUtils.h"
 
-using Simulator::DataMovementHint;
-using Simulator::PageLocation;
+using Simulator::TensorMovementHint;
+using Simulator::TensorLocation;
 
 extern std::string migration_policy_str;
 extern std::string eviction_policy_str;
@@ -50,7 +50,7 @@ std::vector<EvictionGuideEntry> EvictionGuideTable;
 std::vector<long> GPU_resident_memory_estimation;
 std::vector<long> CPU_resident_memory_estimation;
 
-std::vector<DataMovementHint> movement_hints;
+std::vector<TensorMovementHint> movement_hints;
 std::vector<InactivePeriod *> offloaded_local_intervals;
 
 string Tensor::name() const { return "tensor" + std::to_string(tensor_id); }
@@ -278,6 +278,9 @@ void print_GPU_mem_really_in_use() {
  * @brief fill this function to schedule your movement hints
  */
 void scheduling_movement_hints() {
-  // TODO: fill the data structure "std::vector<DataMovementHint> movement_hints" with your own hints!
-  iprintf("TODO: schedule your movement hints here\n", "");
+  // TODO: fill the data structure "std::vector<TensorMovementHint> movement_hints" with your own hints!
+
+
+  // make sure the movement hints are sorted, the simulator depends on this
+  std::sort(movement_hints.begin(), movement_hints.end());
 }

@@ -31,8 +31,8 @@ using std::regex_search;
 using std::stringstream;
 using std::priority_queue;
 using Simulator::GPUPageTable;
-using Simulator::PageLocation;
-using Simulator::DataMovementHint;
+using Simulator::TensorLocation;
+using Simulator::TensorMovementHint;
 using Simulator::MigPolicy;
 
 // statistics and parameters to be filled by main function BEGIN
@@ -64,7 +64,7 @@ extern int num_iteration;
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
 
-extern vector<DataMovementHint> movement_hints;
+extern vector<TensorMovementHint> movement_hints;
 extern vector<EvictionGuideEntry> EvictionGuideTable;
 
 extern long long memory_offset_intermediate;
@@ -91,7 +91,7 @@ CPUPageTable::CPUPageTableEntry *CPUPageTable::createEntry(Addr vpn) {
   assert(!exist(vpn));
   page_table[vpn] = CPUPageTable::CPUPageTableEntry();
   page_table[vpn].in_transfer = false;
-  page_table[vpn].location = PageLocation::NOT_PRESENT;
+  page_table[vpn].location = TensorLocation::NOT_PRESENT;
   return &page_table[vpn];
 }
 
@@ -171,8 +171,8 @@ void CPUPageTable::erasePTE(Addr vpn) {
   assert(page_table.find(vpn) != page_table.end());
   CPUPageTableEntry &entry = page_table[vpn];
   assert(phys_page_avail.find(entry.ppn) == phys_page_avail.end());
-  assert(entry.location == PageLocation::IN_CPU);
-  entry.location = PageLocation::NOT_PRESENT;
+  assert(entry.location == TensorLocation::IN_CPU);
+  entry.location = TensorLocation::NOT_PRESENT;
   entry.in_transfer = false;
   phys_page_avail.insert(entry.ppn);
 }
@@ -255,10 +255,17 @@ bool GPUPageTable::isFull() {
   return phys_page_avail.size() == 0;
 }
 
-tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, GPUPageTable::EvictCandidate>
+/**
+ * @brief Select the 
+ *
+ * @param kernel_id the kernel id when the eviction is ordered
+ * @param is_pf 
+ * @return 
+ */
+tuple<Addr, GPUPageTable::GPUPageTableEntry, TensorLocation, GPUPageTable::EvictCandidate>
     GPUPageTable::selectEvictPTE(int kernel_id, bool is_pf) {
   // GPU memory is full, eviction required
-  tuple<Addr, GPUPageTable::GPUPageTableEntry, PageLocation, EvictCandidate> evicted_entry;
+  tuple<Addr, GPUPageTable::GPUPageTableEntry, TensorLocation, EvictCandidate> evicted_entry;
   switch (policy) {
     case EvcPolicy::RANDOM: {
       // select random entry
@@ -642,10 +649,10 @@ int System::getCurrentIteration() {
   return current_iteration;
 }
 
-void System::getCurrentMovementHints(vector<DataMovementHint> &hints) {
+void System::getCurrentMovementHints(vector<TensorMovementHint> &hints) {
   hints.clear();
   while (movement_hints.size() &&
-      movement_hints[current_hint_index].issued_time % kernel_list.size() ==
+      movement_hints[current_hint_index].issued_kernel_id % kernel_list.size() ==
       current_kernel_iterator->kernel_id) {
     hints.push_back(movement_hints[current_hint_index]);
     current_hint_index = (current_hint_index + 1) % movement_hints.size();
@@ -798,7 +805,7 @@ void Stat::addPCIeBWStat(int current_iter,
 void Stat::addEvcSelection(int current_iter,
                            unsigned long start_time,
                            int kernel_id,
-                           PageLocation to,
+                           TensorLocation to,
                            GPUPageTable::EvictCandidate& candidate) {
   ofstream& fout = get<1>(output_files.at(EvcStat));
   fout << current_iter << "+" << kernel_id <<

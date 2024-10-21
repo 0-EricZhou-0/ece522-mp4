@@ -120,7 +120,7 @@ class KernelBeginEvent : public Event {
      */
     PageFaultInfo transferTensorToGPU(Tensor *tensor, bool is_input);
 
-    void guidedTransfer(DataMovementHint *hint);
+    void guidedTransfer(TensorMovementHint *hint);
 
     /**
      * @brief get the expected page faulted execution time of the kernel
@@ -142,8 +142,8 @@ class BatcherEvent : public Event {
         alloc_pg_num(0), incoming_pg_num(0), outgoing_pg_num(0),
         incoming_pg_SSD(0), incoming_pg_CPU(0),
         outgoing_pg_SSD(0), outgoing_pg_CPU(0),
-        forced_fetch_src(PageLocation::NOT_KNOWN),
-        forced_evc_dest(PageLocation::NOT_KNOWN) {}
+        forced_fetch_src(TensorLocation::NOT_KNOWN),
+        forced_evc_dest(TensorLocation::NOT_KNOWN) {}
     ~BatcherEvent() {}
     bool shouldExecute();
     void execute(vector<Event *> &created_events);
@@ -154,17 +154,17 @@ class BatcherEvent : public Event {
     void processPFAlloc(deque<Addr>* queue);
     void processAlloc(bool is_pf);
 
-    pair<int, int> processFetch(Addr start_addr, PageLocation src, bool is_pf);
+    pair<int, int> processFetch(Addr start_addr, TensorLocation src, bool is_pf);
     pair<int, int> processAlloc(Addr start_addr, bool is_pf);
-    size_t processEvict(Addr starting_addr, PageLocation dest, bool is_pf);
+    size_t processEvict(Addr starting_addr, TensorLocation dest, bool is_pf);
 
-    void recordFetch(PageLocation dest, size_t pg_num);
-    void recordEvict(PageLocation dest, size_t pg_num);
+    void recordFetch(TensorLocation dest, size_t pg_num);
+    void recordEvict(TensorLocation dest, size_t pg_num);
 
     size_t alloc_pg_num, incoming_pg_num, outgoing_pg_num;
     size_t incoming_pg_SSD, incoming_pg_CPU;
     size_t outgoing_pg_SSD, outgoing_pg_CPU;
-    PageLocation forced_fetch_src, forced_evc_dest;
+    TensorLocation forced_fetch_src, forced_evc_dest;
 };
 
 

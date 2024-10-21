@@ -22,13 +22,13 @@ using std::string;
 using std::vector;
 using std::ofstream;
 using std::unordered_set;
-using Simulator::DataMovementHint;
-using Simulator::PageLocation;
+using Simulator::TensorMovementHint;
+using Simulator::TensorLocation;
 
 extern vector<Tensor*> tensor_list;
 extern vector<CUDAKernel> kernel_list;
 // extern vector<Model_Layer*> forward_layers;
-extern vector<DataMovementHint> movement_hints;
+extern vector<TensorMovementHint> movement_hints;
 
 extern long long memory_offset_intermediate;
 extern long long memory_offset_weights;
