@@ -512,7 +512,7 @@ class Stat {
 
     int getAllNumbersInLine(const string& input, vector<string>& output) const;
     void warn_corrupt_stat_file(const string &file) const;
-  
+
     string output_file_basename;
     // <postfix, output file stream, if output initialization required>
     unordered_map<StatFileType, tuple<string, ofstream, bool>> output_files;

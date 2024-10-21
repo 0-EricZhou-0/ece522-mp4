@@ -84,7 +84,7 @@ CPUPageTable::CPUPageTable(size_t expected_size, ssize_t memory_line) {
   page_table.max_load_factor(0.7);
   page_table.reserve(expected_size);
   memory_line_pages = memory_line < 0 ? -1 : memory_line;
-  has_memory_line = memory_line < 0;
+  has_memory_line = memory_line > 0;
   total_memory_pages = 0;
 }
 
@@ -889,10 +889,12 @@ bool Stat::outputFileExists() {
 void Stat::analyzeStat() {
   analyzeKernelStat();
   analyzePCIeStat();
+  analyzeEvcStat();
 }
 
 void Stat::analyzeKernelStat() {
-  ifstream fin(get<0>(output_files[KernelStat]));
+  string stat_file_in = get<0>(output_files[KernelStat]);
+  ifstream fin(stat_file_in);
   ofstream& fout = get<1>(output_files[FinalStat]);
   int curit = 0, line_no = 0;
   string line;
@@ -905,15 +907,14 @@ void Stat::analyzeKernelStat() {
   long curit_exe_time = 0, curit_ideal_exe_time = 0, curit_pf_exe_time = 0;
   long total_exe_time = 0, total_ideal_exe_time = 0, total_pf_exe_time = 0;
   std::ostringstream out_str;
-  // TODO: fix kernel start time in the future
   uint64_t last_e_time = 0;
   while (getline(fin, line)) {
     int num = getAllNumbersInLine(line, stats);
     line_no++;
     if (num != 1 && num != 9 && num != 12) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
-      warn_corrupt_stat_file(get<0>(output_files[KernelStat]));
+          line.c_str(), stat_file_in.c_str(), line_no);
+      warn_corrupt_stat_file(stat_file_in);
       assert(false);
     }
 
@@ -981,10 +982,13 @@ void Stat::analyzeKernelStat() {
     curit_ideal_exe_time += stol(stats[4]);
     curit_pf_exe_time += stol(stats[5]);
   }
+  if (line_no == 0)
+    warn_corrupt_stat_file(stat_file_in);
 }
 
 void Stat::analyzePCIeStat() {
-  ifstream fin(get<0>(output_files[PCIeStat]));
+  string stat_file_in = get<0>(output_files[PCIeStat]);
+  ifstream fin(stat_file_in);
   ofstream& fout = get<1>(output_files[FinalStat]);
   int curit = 0, line_no = 0;
   string line;
@@ -1005,8 +1009,8 @@ void Stat::analyzePCIeStat() {
     line_no++;
     if (num != 1 && num != 9) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[PCIeStat]).c_str(), line_no);
-      warn_corrupt_stat_file(get<0>(output_files[PCIeStat]));
+          line.c_str(), stat_file_in.c_str(), line_no);
+      warn_corrupt_stat_file(stat_file_in);
       assert(false);
     }
 
@@ -1061,10 +1065,13 @@ void Stat::analyzePCIeStat() {
     curit_outgoing_pg_ssd += stol(stats[7]);
     curit_outgoing_pg_cpu += stol(stats[8]);
   }
+  if (line_no == 0)
+    warn_corrupt_stat_file(stat_file_in);
 }
 
 void Stat::analyzeEvcStat() {
-  ifstream fin(get<0>(output_files[EvcStat]));
+  string stat_file_in = get<0>(output_files[EvcStat]);
+  ifstream fin(stat_file_in);
   ofstream& fout = get<1>(output_files[FinalStat]);
   int curit = 0, line_no = 0;
   long timestamp, current_timestamp = -1;
@@ -1080,8 +1087,8 @@ void Stat::analyzeEvcStat() {
     line_no++;
     if (num != 1 && num != 7) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[EvcStat]).c_str(), line_no);
-      warn_corrupt_stat_file(get<0>(output_files[EvcStat]));
+          line.c_str(), stat_file_in.c_str(), line_no);
+      warn_corrupt_stat_file(stat_file_in);
       assert(false);
     }
 
@@ -1130,6 +1137,8 @@ void Stat::analyzeEvcStat() {
     Eviction_P hotness = static_cast<Eviction_P>(stoi(stats[6]));
     curit_hotness[hotness]++;
   }
+  if (line_no == 0)
+    warn_corrupt_stat_file(stat_file_in);
 }
 
 int Stat::getAllNumbersInLine(const string& input, vector<string>& output) const {
@@ -1152,7 +1161,7 @@ int Stat::getAllNumbersInLine(const string& input, vector<string>& output) const
 }
 
 void Stat::warn_corrupt_stat_file(const string &file) const {
-  wprintf("The content of stat file %s is. "
+  wprintf("The content of stat file %s is corrupted. "
     "If simulation is not correctly finished, delete the simulation output folder and start a new simulation.\n",
     file.c_str());
 }
