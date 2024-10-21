@@ -900,11 +900,12 @@ void Stat::analyzeKernelStat() {
   // TODO: fix kernel start time in the future
   uint64_t last_e_time = 0;
   while (getline(fin, line)) {
-    int num = getAllNumersInLine(line, stats);
+    int num = getAllNumbersInLine(line, stats);
     line_no++;
     if (num != 1 && num != 9 && num != 12) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
           line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
+      warn_corrupt_stat_file(get<0>(output_files[KernelStat]));
       assert(false);
     }
 
@@ -992,11 +993,12 @@ void Stat::analyzePCIeStat() {
   // TODO: fix kernel start time in the future
   uint64_t last_e_time = 0;
   while (getline(fin, line)) {
-    int num = getAllNumersInLine(line, stats);
+    int num = getAllNumbersInLine(line, stats);
     line_no++;
     if (num != 1 && num != 9) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
-          line.c_str(), get<0>(output_files[KernelStat]).c_str(), line_no);
+          line.c_str(), get<0>(output_files[PCIeStat]).c_str(), line_no);
+      warn_corrupt_stat_file(get<0>(output_files[PCIeStat]));
       assert(false);
     }
 
@@ -1066,11 +1068,12 @@ void Stat::analyzeEvcStat() {
   map<Eviction_P, long> curit_hotness, total_hotness;
   std::ostringstream out_str;
   while (getline(fin, line)) {
-    int num = getAllNumersInLine(line, stats);
+    int num = getAllNumbersInLine(line, stats);
     line_no++;
     if (num != 1 && num != 7) {
       eprintf("Invalid line <%s> in stat file <%s:%d>, abort\n",
           line.c_str(), get<0>(output_files[EvcStat]).c_str(), line_no);
+      warn_corrupt_stat_file(get<0>(output_files[EvcStat]));
       assert(false);
     }
 
@@ -1121,7 +1124,7 @@ void Stat::analyzeEvcStat() {
   }
 }
 
-int Stat::getAllNumersInLine(const string& input, vector<string>& output) const {
+int Stat::getAllNumbersInLine(const string& input, vector<string>& output) const {
   const static auto is_numerical = [](char c) {
     return (c >= '0' && c <= '9') || c == '.' || c == '-';
   };
@@ -1139,6 +1142,13 @@ int Stat::getAllNumersInLine(const string& input, vector<string>& output) const 
   }
   return output.size();
 }
+
+void Stat::warn_corrupt_stat_file(const string &file) const {
+  wprintf("The content of stat file %s is. "
+    "If simulation is not correctly finished, delete the simulation output folder and start a new simulation.\n",
+    file.c_str());
+}
+
 // Stat END ========================
 
 } // namespace Simulator
