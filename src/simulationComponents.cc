@@ -80,10 +80,11 @@ extern System *sim_sys;
 extern Stat *sim_stat;
 
 // CPUPageTable BEGIN ========================
-CPUPageTable::CPUPageTable(int expected_size, int memory_line) {
-  page_table.max_load_factor(0.8);
+CPUPageTable::CPUPageTable(size_t expected_size, ssize_t memory_line) {
+  page_table.max_load_factor(0.7);
   page_table.reserve(expected_size);
-  memory_line_pages = memory_line;
+  memory_line_pages = memory_line < 0 ? -1 : memory_line;
+  has_memory_line = memory_line < 0;
   total_memory_pages = 0;
 }
 
@@ -110,7 +111,7 @@ void CPUPageTable::allocPTE(Addr vpn) {
   if (phys_page_avail.size() == 0) {
     phys_page_avail.insert(total_memory_pages * PAGE_SIZE);
     total_memory_pages++;
-    assert(total_memory_pages <= memory_line_pages);
+    assert(has_memory_line || total_memory_pages <= memory_line_pages);
   }
   Addr ppn = *phys_page_avail.begin();
   phys_page_avail.erase(ppn);
@@ -181,9 +182,15 @@ pair<size_t, size_t> CPUPageTable::getCapacity() {
   return make_pair(total_memory_pages - phys_page_avail.size(), total_memory_pages);
 }
 
+long CPUPageTable::getMemoryLinePages() {
+  if (has_memory_line)
+    return total_memory_pages;
+  return -1;
+}
+
 bool CPUPageTable::reachMemoryLine() {
-  assert(total_memory_pages <= memory_line_pages);
-  return total_memory_pages - phys_page_avail.size() == memory_line_pages;
+  assert(has_memory_line || total_memory_pages <= memory_line_pages);
+  return !has_memory_line && total_memory_pages - phys_page_avail.size() == memory_line_pages;
 }
 
 void CPUPageTable::report() {
@@ -575,7 +582,7 @@ System::System() :
     SSD_latency(SSD_latency_us),
     CPU_PT(CPUPageTable(
         (memory_offset_intermediate + memory_offset_weights) / PAGE_SIZE,
-        CPU_memory_line_GB * pow(1024, 3) / 4096)),
+        CPU_memory_line_GB < 0 ? -1 : CPU_memory_line_GB * pow(1024, 3) / 4096)),
     GPU_PT(GPUPageTable(GPU_total_memory_pages, evc_policy, num_candidate)) {
   printf("========== Simulation Setting ==========\n");
   printf(" General:\n");
@@ -587,6 +594,7 @@ System::System() :
   printf("  CPU PCIe Batch Num:         %-10d\n", CPU_PCIe_batch_num);
   printf("  CPU PCIe BW Utilization:    %-6.3f\n",
       (double) CPU_PCIe_batch_num / PCIe_batch_ii_cycle / CPU_PCIe_bandwidth_Bpc * PAGE_SIZE * 100);
+  printf("  CPU Memory Line:            %-10ld\n", CPU_PT.getMemoryLinePages());
   printf(" GPU:\n");
   printf("  GPU Frequency Hz:           %-10ld\n", GPU_frequency_Hz);
   printf("  GPU Total Memory Pages:     %-10ld\n", GPU_total_memory_pages);

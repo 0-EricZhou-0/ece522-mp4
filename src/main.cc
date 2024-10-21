@@ -124,36 +124,6 @@ class RedirStdOut {
         std::streambuf *cout_buf;
 };
 
-// /* Function: PrintOneToken()
-//  * Usage: PrintOneToken(T_Double, "3.5", val, loc);
-//  * -----------------------------------------------
-//  */
-// static void PrintOneToken(yytokentype token, const char *text, YYSTYPE value,
-//                           yyltype loc)
-// {
-//   char buffer[] = {'\'', (char) token, '\'', '\0'};
-//   const char *name = token >= T_Sequential ? gTokenNames[token - T_Sequential] : buffer;
-
-//   printf("%-12s line %d cols %d-%d is %s ", text,
-// 	   loc.first_line, loc.first_column, loc.last_column, name);
-
-//   switch(token) {
-//     case T_IntConstant:
-//       printf("(value = %d)\n", value.integerConstant); break;
-//     case T_DoubleConstant:
-//       printf("(value = %g)\n", value.doubleConstant); break;
-//     case T_BoolConstant:
-//       printf("(value = %s)\n", value.boolConstant ? "true" : "false"); break;
-//     case T_Identifier:
-// 	if (strcmp(text, value.identifier)) {
-// 	  printf("(truncated to %s)\n", value.identifier);
-// 	  break;
-// 	}
-//     default:
-//       printf("\n"); break;
-//   }
-// }
-
 void CheckVar(double var, std::string variable_name, bool gt=true) {
     if ((gt && var < 0) || (!gt && var > 0)) {
         eprintf("Invalid or missing <%s>, current value: %f, should be %s than 0, aborting\n",
@@ -171,7 +141,6 @@ void SimulationParamSanityCheck() {
     CheckVar(GPU_frequency_GHz, "GPU_frequency_GHz");
     CheckVar(GPU_memory_size_GB, "GPU_memory_size_GB");
     CheckVar(GPU_malloc_uspB, "GPU_malloc_uspB");
-    CheckVar(CPU_memory_line_GB, "CPU_memory_line_GB");
 
     if (migration_policy == Simulator::MigPolicy::DEEPUM)
         assert(eviction_policy == Simulator::GPUPageTable::EvcPolicy::DEEPUM);
@@ -517,7 +486,7 @@ int main(int argc, char *argv[]) {
                 max_mem_usage_kernel->kernel_id, max_num_pages * PAGE_SIZE,
                 max_memory_usage_GB);
         if (max_memory_usage_GB > GPU_memory_size_GB) {
-            eprintf("Single kernel memory usage %f GB greater than total GPU memory size %f GB, aborting",
+            eprintf("Single kernel memory usage %f GB greater than total GPU memory size %f GB, aborting\n",
                     max_memory_usage_GB, GPU_memory_size_GB);
             assert(false);
         }

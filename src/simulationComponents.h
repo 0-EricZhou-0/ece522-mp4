@@ -48,7 +48,7 @@ class CPUPageTable {
       TensorLocation location;
       bool in_transfer;
     };
-    CPUPageTable(int expected_size, int memory_line);
+    CPUPageTable(size_t expected_size, ssize_t memory_line);
 
     /**
      * @brief create a CPU PTE using specified VAddr
@@ -111,6 +111,8 @@ class CPUPageTable {
 
     pair<size_t, size_t> getCapacity();
 
+    long getMemoryLinePages();
+
     bool reachMemoryLine();
 
     // report the current status of the CPU PT
@@ -122,6 +124,7 @@ class CPUPageTable {
 
     unordered_set<Addr> in_transfer_pages;
 
+    bool has_memory_line;
     unsigned long memory_line_pages;
     unsigned long total_memory_pages;
 };
