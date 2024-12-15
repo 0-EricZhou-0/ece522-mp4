@@ -1,0 +1,45 @@
+diff --git a/src/simulationComponents.cc b/src/simulationComponents.cc
+index 4edbf8a..83378e9 100644
+--- a/src/simulationComponents.cc
++++ b/src/simulationComponents.cc
+@@ -111,7 +111,7 @@ void CPUPageTable::allocPTE(Addr vpn) {
+   if (phys_page_avail.size() == 0) {
+     phys_page_avail.insert(total_memory_pages * PAGE_SIZE);
+     total_memory_pages++;
+-    assert(has_memory_line || total_memory_pages <= memory_line_pages);
++    assert(!has_memory_line || total_memory_pages <= memory_line_pages);
+   }
+   Addr ppn = *phys_page_avail.begin();
+   phys_page_avail.erase(ppn);
+@@ -184,13 +184,12 @@ pair<size_t, size_t> CPUPageTable::getCapacity() {
+ 
+ long CPUPageTable::getMemoryLinePages() {
+   if (has_memory_line)
+-    return total_memory_pages;
++    return memory_line_pages;
+   return -1;
+ }
+ 
+ bool CPUPageTable::reachMemoryLine() {
+-  assert(has_memory_line || total_memory_pages <= memory_line_pages);
+-  return !has_memory_line && total_memory_pages - phys_page_avail.size() == memory_line_pages;
++  return has_memory_line && total_memory_pages >= memory_line_pages;
+ }
+ 
+ void CPUPageTable::report() {
+diff --git a/src/simulationEvents.cc b/src/simulationEvents.cc
+index 2de3283..1a01416 100644
+--- a/src/simulationEvents.cc
++++ b/src/simulationEvents.cc
+@@ -659,6 +659,11 @@ size_t BatcherEvent::processEvict(Addr start_addr, TensorLocation dest, bool is_
+     }
+   }
+ 
++  // overriding destination if CPU is already full
++  if (dest == IN_CPU && sim_sys->CPU_PT.reachMemoryLine()) {
++    dest = IN_SSD;
++  }
++
+   if (dest == IN_CPU) {
+     sim_sys->CPU_PT.allocPTE(start_addr);
+     assert(CPU_PTE->location == IN_CPU);
